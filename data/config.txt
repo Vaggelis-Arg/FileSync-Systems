@@ -1,2 +1,2 @@
-/home/user/docs /backup/docs
-/home/user/pics /backup/pics
+/tmp/source1 /tmp/target1
+/tmp/source2 /tmp/target2

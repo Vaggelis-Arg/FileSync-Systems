@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <sys/inotify.h>
 
 typedef struct SyncInfo {
     char *source;
@@ -50,15 +51,29 @@ SyncInfo* parse_config(const char *filename) {
     return head;
 }
 
+void setup_inotify(SyncInfo *config) {
+    int inotify_fd = inotify_init();
+    if (inotify_fd == -1) {
+        perror("inotify_init");
+        exit(EXIT_FAILURE);
+    }
+
+    SyncInfo *current = config;
+    while (current) {
+        int wd = inotify_add_watch(inotify_fd, current->source, 
+                                  IN_CREATE | IN_MODIFY | IN_DELETE);
+        if (wd == -1) {
+            printf("Failed to watch %s\n", current->source);
+        } else {
+            printf("Watching: %s (wd=%d)\n", current->source, wd);
+        }
+        current = current->next;
+    }
+}
+
 int main() {
     create_named_pipes();
     SyncInfo *config = parse_config("../data/config.txt");
-    
-    // Print config for verification
-    SyncInfo *current = config;
-    while (current) {
-        printf("Source: %s -> Target: %s\n", current->source, current->target);
-        current = current->next;
-    }
+    setup_inotify(config);
     return 0;
 }
