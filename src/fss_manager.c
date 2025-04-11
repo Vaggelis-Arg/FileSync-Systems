@@ -71,9 +71,24 @@ void setup_inotify(SyncInfo *config) {
     }
 }
 
+void start_worker(const char *source, const char *target) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("./worker", "worker", source, target, NULL);
+        perror("execl");
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) {
+        printf("Started worker PID: %d\n", pid);
+    } else {
+        perror("fork");
+    }
+}
+
 int main() {
     create_named_pipes();
-    SyncInfo *config = parse_config("../data/config.txt");
-    setup_inotify(config);
+    SyncInfo *config = parse_config("config.txt");
+    
+    // Test worker creation
+    start_worker("/tmp/source1", "/tmp/target1");
     return 0;
 }
