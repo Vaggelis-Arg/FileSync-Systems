@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
     int worker_limit = 5;
     int i = 1;  // Start from first argument after program name
 
-	if(argc < 7) {
+	if(argc < 5) {
 		fprintf(stderr, "Usage: %s -l <logfile> -c <config> [-n <workers>]\n", argv[0]);
         exit(EXIT_FAILURE);
 	}
@@ -143,9 +143,6 @@ int main(int argc, char *argv[]) {
             if (i+1 < argc) {
                 worker_limit = atoi(argv[i+1]);
                 i += 2;
-            } else {
-                fprintf(stderr, "Missing number for -n option\n");
-                exit(EXIT_FAILURE);
             }
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
