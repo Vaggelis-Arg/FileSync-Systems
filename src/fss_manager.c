@@ -6,6 +6,9 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <sys/inotify.h>
+#include <signal.h>
+#include <sys/wait.h>
+
 
 typedef struct SyncInfo {
     char *source;
@@ -84,11 +87,17 @@ void start_worker(const char *source, const char *target) {
     }
 }
 
+void sigchld_handler(int sig) {
+    int status;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("Worker %d exited\n", pid);
+    }
+}
+
 int main() {
-    create_named_pipes();
-    SyncInfo *config = parse_config("config.txt");
-    
-    // Test worker creation
-    start_worker("/tmp/source1", "/tmp/target1");
+    signal(SIGCHLD, sigchld_handler);
+    start_worker("/home/user/docs", "/backup/docs");
+    sleep(2); // Wait for worker to finish
     return 0;
 }
