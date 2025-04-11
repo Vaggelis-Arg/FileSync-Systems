@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -15,7 +16,7 @@ void sync_file(const char *src, const char *dest) {
         *slash = '\0';
         mkdir(path, 0755);  // Create parent directory
     }
-	
+
     int sfd = open(src, O_RDONLY);
     if (sfd == -1) {
         printf("ERROR opening %s: %s\n", src, strerror(errno));
@@ -42,25 +43,36 @@ void sync_file(const char *src, const char *dest) {
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
-        fprintf(stderr, "Usage: worker <source> <target>\n");
-        return 1;
+        fprintf(stderr, "Usage: %s <source> <target>\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 
+    printf("EXEC_REPORT_START\n");
+    printf("STATUS: SUCCESS\n");
+    
     DIR *dir = opendir(argv[1]);
     if (!dir) {
-        printf("ERROR: %s\n", strerror(errno));
-        return 1;
+        printf("STATUS: ERROR\nDETAILS: Failed to open directory\n");
+        exit(EXIT_FAILURE);
     }
 
     struct dirent *entry;
+    int file_count = 0;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG) { // Regular files only
-            char src_path[256], dest_path[256];
+            char src_path[1024];
+            char dest_path[1024];
+            
             snprintf(src_path, sizeof(src_path), "%s/%s", argv[1], entry->d_name);
             snprintf(dest_path, sizeof(dest_path), "%s/%s", argv[2], entry->d_name);
+            
             sync_file(src_path, dest_path);
+            file_count++;
         }
     }
     closedir(dir);
+
+    printf("DETAILS: %d files copied\n", file_count);
+    printf("EXEC_REPORT_END\n");
     return 0;
 }

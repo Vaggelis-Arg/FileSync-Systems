@@ -20,6 +20,8 @@ typedef struct SyncInfo {
     struct SyncInfo *next;
 } SyncInfo;
 
+int worker_limit = 5;
+
 void create_named_pipes() {
     // Remove existing pipes
     unlink("fss_in");
@@ -114,7 +116,6 @@ void log_message(const char *logfile, const char *message) {
 int main(int argc, char *argv[]) {
     char *logfile = "manager.log";
     char *config_file = NULL;
-    int worker_limit = 5;
     int i = 1;  // Start from first argument after program name
 
 	if(argc < 5) {

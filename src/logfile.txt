@@ -1,0 +1,12 @@
+[2025-04-11 20:12:26] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 20:12:26] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-11 20:54:06] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 20:54:06] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-11 20:54:18] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 20:54:18] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-11 20:54:32] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 20:54:32] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-11 20:54:37] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 20:54:37] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-11 21:07:14] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 21:07:14] Added directory: /tmp/source1 -> /tmp/target1
