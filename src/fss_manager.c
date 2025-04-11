@@ -27,6 +27,8 @@ int worker_limit = 5;
 typedef struct WorkerTask {
     char *source;
     char *target;
+	char *filename;
+    char *operation;
     struct WorkerTask *next;
 } WorkerTask;
 
@@ -134,6 +136,8 @@ void start_worker_with_operation(const char *source, const char *target,
         WorkerTask *new_task = malloc(sizeof(WorkerTask));
         new_task->source = strdup(source);
         new_task->target = strdup(target);
+		new_task->filename = strdup(filename);
+		new_task->operation = strdup(operation);
         new_task->next = task_queue;
         task_queue = new_task;
         printf("Worker queue full. Queued operation: %s on %s\n", operation, source);
@@ -154,10 +158,6 @@ void start_worker_with_operation(const char *source, const char *target,
     }
 }
 
-void start_worker(const char *source, const char *target) {
-    start_worker_with_operation(source, target, "ALL", "FULL");
-}
-
 void sigchld_handler(int sig) {
     int status;
     pid_t pid;
@@ -171,9 +171,17 @@ void sigchld_handler(int sig) {
             WorkerTask *task = task_queue;
             task_queue = task_queue->next;
             
-            start_worker(task->source, task->target);
+            start_worker_with_operation(
+                task->source, 
+                task->target,
+                task->filename,
+                task->operation
+            );
+            
             free(task->source);
             free(task->target);
+            free(task->filename);
+            free(task->operation);
             free(task);
         }
     }
@@ -243,7 +251,12 @@ int main(int argc, char *argv[]) {
                 current->source, current->target);
         log_message(logfile, log_buffer);
         
-        start_worker(current->source, current->target);
+        start_worker_with_operation(
+			current->source, 
+			current->target, 
+			"ALL", 
+			"FULL"
+		);
         current = current->next;
     }
 
