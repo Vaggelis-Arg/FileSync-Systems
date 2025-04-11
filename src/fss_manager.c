@@ -22,6 +22,15 @@ typedef struct SyncInfo {
 
 int worker_limit = 5;
 
+typedef struct WorkerTask {
+    char *source;
+    char *target;
+    struct WorkerTask *next;
+} WorkerTask;
+
+WorkerTask *task_queue = NULL;
+int active_workers = 0;
+
 void create_named_pipes() {
     // Remove existing pipes
     unlink("fss_in");
@@ -81,13 +90,27 @@ void setup_inotify(SyncInfo *config) {
 }
 
 void start_worker(const char *source, const char *target) {
+    if (active_workers >= worker_limit) {
+        // Add to queue
+        WorkerTask *new_task = malloc(sizeof(WorkerTask));
+        new_task->source = strdup(source);
+        new_task->target = strdup(target);
+        new_task->next = task_queue;
+        task_queue = new_task;
+        printf("Worker queue full. Queued task: %s\n", source);
+        return;
+    }
+
     pid_t pid = fork();
     if (pid == 0) {
+        // Worker process
         execl("./worker", "worker", source, target, NULL);
         perror("execl");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
-        printf("Started worker PID: %d\n", pid);
+        active_workers++;
+        printf("Started worker PID: %d (Active: %d/%d)\n", 
+              pid, active_workers, worker_limit);
     } else {
         perror("fork");
     }
@@ -97,7 +120,20 @@ void sigchld_handler(int sig) {
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        printf("Worker %d exited\n", pid);
+        active_workers--;
+        printf("Worker %d exited. Active: %d/%d\n", 
+              pid, active_workers, worker_limit);
+        
+        // Process queued tasks
+        while (task_queue && active_workers < worker_limit) {
+            WorkerTask *task = task_queue;
+            task_queue = task_queue->next;
+            
+            start_worker(task->source, task->target);
+            free(task->source);
+            free(task->target);
+            free(task);
+        }
     }
 }
 
