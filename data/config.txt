@@ -1,0 +1,2 @@
+/home/user/docs /backup/docs
+/home/user/pics /backup/pics
