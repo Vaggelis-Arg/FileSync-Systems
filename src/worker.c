@@ -5,16 +5,16 @@
 #include <dirent.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 
 void sync_file(const char *src, const char *dest) {
-
-	// First create parent directory if needed
+    // Create parent directory if needed
     char path[256];
     strncpy(path, dest, sizeof(path));
     char *slash = strrchr(path, '/');
     if (slash) {
         *slash = '\0';
-        mkdir(path, 0755);  // Create parent directory
+        mkdir(path, 0755);
     }
 
     int sfd = open(src, O_RDONLY);
@@ -38,41 +38,82 @@ void sync_file(const char *src, const char *dest) {
 
     close(sfd);
     close(dfd);
-    printf("SUCCESS: Copied %s\n", src);
+}
+
+void delete_file(const char *path) {
+    if (unlink(path) == -1) {
+        printf("ERROR deleting %s: %s\n", path, strerror(errno));
+    }
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <source> <target>\n", argv[0]);
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <source> <target> <filename> <operation>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+
+    const char *source = argv[1];
+    const char *target = argv[2];
+    const char *filename = argv[3];
+    const char *operation = argv[4];
 
     printf("EXEC_REPORT_START\n");
-    printf("STATUS: SUCCESS\n");
-    
-    DIR *dir = opendir(argv[1]);
-    if (!dir) {
-        printf("STATUS: ERROR\nDETAILS: Failed to open directory\n");
-        exit(EXIT_FAILURE);
-    }
+    int status = 1;
+    int error_count = 0;
+    char details[1024] = {0};
 
-    struct dirent *entry;
-    int file_count = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG) { // Regular files only
-            char src_path[1024];
-            char dest_path[1024];
-            
-            snprintf(src_path, sizeof(src_path), "%s/%s", argv[1], entry->d_name);
-            snprintf(dest_path, sizeof(dest_path), "%s/%s", argv[2], entry->d_name);
-            
+    if (strcmp(operation, "FULL") == 0) {
+        // Full directory sync
+        DIR *dir = opendir(source);
+        if (!dir) {
+            printf("STATUS: ERROR\nDETAILS: Failed to open directory\n");
+            exit(EXIT_FAILURE);
+        }
+
+        struct dirent *entry;
+        int file_count = 0;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type == DT_REG) {
+                char src_path[1024], dest_path[1024];
+                snprintf(src_path, sizeof(src_path), "%s/%s", source, entry->d_name);
+                snprintf(dest_path, sizeof(dest_path), "%s/%s", target, entry->d_name);
+                
+                sync_file(src_path, dest_path);
+                file_count++;
+            }
+        }
+        closedir(dir);
+        snprintf(details, sizeof(details), "%d files copied", file_count);
+        status = 0;
+    } 
+    else {
+        // Single file operation
+        char src_path[1024], dest_path[1024];
+        snprintf(src_path, sizeof(src_path), "%s/%s", source, filename);
+        snprintf(dest_path, sizeof(dest_path), "%s/%s", target, filename);
+
+        if (strcmp(operation, "ADDED") == 0 || strcmp(operation, "MODIFIED") == 0) {
             sync_file(src_path, dest_path);
-            file_count++;
+            snprintf(details, sizeof(details), "File: %s", filename);
+            status = 0;
+        } 
+        else if (strcmp(operation, "DELETED") == 0) {
+            delete_file(dest_path);
+            snprintf(details, sizeof(details), "File: %s", filename);
+            status = 0;
         }
     }
-    closedir(dir);
 
-    printf("DETAILS: %d files copied\n", file_count);
+    if (status == 0) {
+        printf("STATUS: SUCCESS\n");
+    } else {
+        printf("STATUS: ERROR\n");
+        error_count++;
+    }
+
+    printf("DETAILS: %s\n", details);
+    printf("ERRORS: %d\n", error_count);
     printf("EXEC_REPORT_END\n");
-    return 0;
+    
+    return status;
 }

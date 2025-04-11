@@ -10,15 +10,17 @@
 #include <sys/wait.h>
 #include <time.h>
 
-
 typedef struct SyncInfo {
     char *source;
     char *target;
+	int wd;
     time_t last_sync;
     int active;
     int error_count;
     struct SyncInfo *next;
 } SyncInfo;
+
+SyncInfo *config = NULL;
 
 int worker_limit = 5;
 
@@ -30,6 +32,8 @@ typedef struct WorkerTask {
 
 WorkerTask *task_queue = NULL;
 int active_workers = 0;
+
+int inotify_fd;
 
 void create_named_pipes() {
     // Remove existing pipes
@@ -69,7 +73,7 @@ SyncInfo* parse_config(const char *filename) {
     return head;
 }
 
-void setup_inotify(SyncInfo *config) {
+void setup_inotify() {
     int inotify_fd = inotify_init();
     if (inotify_fd == -1) {
         perror("inotify_init");
@@ -78,18 +82,53 @@ void setup_inotify(SyncInfo *config) {
 
     SyncInfo *current = config;
     while (current) {
-        int wd = inotify_add_watch(inotify_fd, current->source, 
+        current->wd = inotify_add_watch(inotify_fd, current->source, 
                                   IN_CREATE | IN_MODIFY | IN_DELETE);
-        if (wd == -1) {
+        if (current->wd == -1) {
             printf("Failed to watch %s\n", current->source);
         } else {
-            printf("Watching: %s (wd=%d)\n", current->source, wd);
+            printf("Watching: %s (wd=%d)\n", current->source, current->wd);
         }
         current = current->next;
     }
 }
 
-void start_worker(const char *source, const char *target) {
+SyncInfo* find_sync_info_by_wd(int wd) {
+    SyncInfo *current = config;
+    while (current) {
+        if (current->wd == wd) {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL; // Not found
+}
+
+void handle_inotify_events() {
+    char buffer[4096];
+    ssize_t len = read(inotify_fd, buffer, sizeof(buffer));
+    
+    for (char *ptr = buffer; ptr < buffer + len; ) {
+        struct inotify_event *event = (struct inotify_event *)ptr;
+        SyncInfo *info = find_sync_info_by_wd(event->wd);
+        
+        if (info && event->len > 0) {
+            char *filename = event->name;
+            char operation[10];
+            
+            if (event->mask & IN_CREATE) strcpy(operation, "ADDED");
+            else if (event->mask & IN_MODIFY) strcpy(operation, "MODIFIED");
+            else if (event->mask & IN_DELETE) strcpy(operation, "DELETED");
+            
+            // Start worker with specific operation
+            start_worker_with_operation(info->source, info->target, filename, operation);
+        }
+        ptr += sizeof(struct inotify_event) + event->len;
+    }
+}
+
+void start_worker_with_operation(const char *source, const char *target, 
+	const char *filename, const char *operation) {
     if (active_workers >= worker_limit) {
         // Add to queue
         WorkerTask *new_task = malloc(sizeof(WorkerTask));
@@ -97,23 +136,26 @@ void start_worker(const char *source, const char *target) {
         new_task->target = strdup(target);
         new_task->next = task_queue;
         task_queue = new_task;
-        printf("Worker queue full. Queued task: %s\n", source);
+        printf("Worker queue full. Queued operation: %s on %s\n", operation, source);
         return;
     }
 
     pid_t pid = fork();
     if (pid == 0) {
         // Worker process
-        execl("./worker", "worker", source, target, NULL);
+        execl("./worker", "worker", source, target, filename, operation, NULL);
         perror("execl");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
         active_workers++;
-        printf("Started worker PID: %d (Active: %d/%d)\n", 
-              pid, active_workers, worker_limit);
+        printf("Started worker PID: %d for %s (%s)\n", pid, operation, filename);
     } else {
         perror("fork");
     }
+}
+
+void start_worker(const char *source, const char *target) {
+    start_worker_with_operation(source, target, "ALL", "FULL");
 }
 
 void sigchld_handler(int sig) {
@@ -190,7 +232,7 @@ int main(int argc, char *argv[]) {
 
     create_named_pipes();
     SyncInfo *config = parse_config(config_file);
-    setup_inotify(config);
+    setup_inotify();
     signal(SIGCHLD, sigchld_handler);
 
     // Start initial workers with logging

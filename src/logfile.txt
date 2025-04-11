@@ -14,3 +14,5 @@
 [2025-04-11 21:41:46] Added directory: /tmp/source1 -> /tmp/target1
 [2025-04-11 21:42:11] Added directory: /tmp/source2 -> /tmp/target2
 [2025-04-11 21:42:11] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-11 23:51:30] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-11 23:51:30] Added directory: /tmp/source1 -> /tmp/target1
