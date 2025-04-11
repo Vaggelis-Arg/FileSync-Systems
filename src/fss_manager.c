@@ -8,11 +8,15 @@
 #include <sys/inotify.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <time.h>
 
 
 typedef struct SyncInfo {
     char *source;
     char *target;
+    time_t last_sync;
+    int active;
+    int error_count;
     struct SyncInfo *next;
 } SyncInfo;
 
@@ -93,6 +97,18 @@ void sigchld_handler(int sig) {
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
         printf("Worker %d exited\n", pid);
     }
+}
+
+void log_message(const char *logfile, const char *message) {
+    FILE *fp = fopen(logfile, "a");
+    if (!fp) return;
+    
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
+            t->tm_year+1900, t->tm_mon+1, t->tm_mday,
+            t->tm_hour, t->tm_min, t->tm_sec, message);
+    fclose(fp);
 }
 
 int main() {
