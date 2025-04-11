@@ -111,9 +111,66 @@ void log_message(const char *logfile, const char *message) {
     fclose(fp);
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    char *logfile = "manager.log";
+    char *config_file = NULL;
+    int worker_limit = 5;
+    int i = 1;  // Start from first argument after program name
+
+	if(argc < 7) {
+		fprintf(stderr, "Usage: %s -l <logfile> -c <config> [-n <workers>]\n", argv[0]);
+        exit(EXIT_FAILURE);
+	}
+
+    while (i < argc) {
+        if (strcmp(argv[i], "-l") == 0) {
+            if (i+1 < argc) {
+                logfile = argv[i+1];
+                i += 2;
+            } else {
+                fprintf(stderr, "Missing filename for -l option\n");
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(argv[i], "-c") == 0) {
+            if (i+1 < argc) {
+                config_file = argv[i+1];
+                i += 2;
+            } else {
+                fprintf(stderr, "Missing filename for -c option\n");
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(argv[i], "-n") == 0) {
+            if (i+1 < argc) {
+                worker_limit = atoi(argv[i+1]);
+                i += 2;
+            } else {
+                fprintf(stderr, "Missing number for -n option\n");
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            fprintf(stderr, "Usage: %s -l <logfile> -c <config> [-n <workers>]\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    create_named_pipes();
+    SyncInfo *config = parse_config(config_file);
+    setup_inotify(config);
     signal(SIGCHLD, sigchld_handler);
-    start_worker("/home/user/docs", "/backup/docs");
-    sleep(2); // Wait for worker to finish
-    return 0;
+
+    // Start initial workers with logging
+    SyncInfo *current = config;
+    while (current) {
+        char log_buffer[512];
+        snprintf(log_buffer, sizeof(log_buffer), "Added directory: %s -> %s", 
+                current->source, current->target);
+        log_message(logfile, log_buffer);
+        
+        start_worker(current->source, current->target);
+        current = current->next;
+    }
+
+    // Main loop would go here
+    while (1) pause();  // Temporary placeholder
 }
