@@ -145,22 +145,10 @@ void sigchld_handler(int sig) {
 }
 
 void setup_inotify() {
-    int inotify_fd = inotify_init();
+    inotify_fd = inotify_init();
     if (inotify_fd == -1) {
         perror("inotify_init");
         exit(EXIT_FAILURE);
-    }
-
-    SyncInfo *current = config;
-    while (current) {
-        current->wd = inotify_add_watch(inotify_fd, current->source, 
-                                  IN_CREATE | IN_MODIFY | IN_DELETE);
-        if (current->wd == -1) {
-            printf("Failed to watch %s\n", current->source);
-        } else {
-            printf("Watching: %s (wd=%d)\n", current->source, current->wd);
-        }
-        current = current->next;
     }
 }
 
@@ -262,6 +250,18 @@ int main(int argc, char *argv[]) {
         snprintf(log_buffer, sizeof(log_buffer), "Added directory: %s -> %s", 
                 current->source, current->target);
         log_message(logfile, log_buffer);
+
+		current->wd = inotify_add_watch(inotify_fd, current->source, 
+			IN_CREATE | IN_MODIFY | IN_DELETE);
+		if (current->wd == -1) {
+			printf("Failed to watch %s\n", current->source);
+			snprintf(log_buffer, sizeof(log_buffer), "Failed to watch %s\n", current->source);
+        	log_message(logfile, log_buffer);
+		} else {
+			printf("Monitoring started for %s (wd=%d)\n", current->source, current->wd);
+			snprintf(log_buffer, sizeof(log_buffer), "Monitoring started for %s (wd=%d)\n", current->source, current->wd);
+        	log_message(logfile, log_buffer);
+		}
         
         start_worker_with_operation(
 			current->source, 

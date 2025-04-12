@@ -1,2 +1,6 @@
-[2025-04-11 18:47:23] Added directory: /tmp/source2 -> /tmp/target2
-[2025-04-11 18:47:23] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-13 02:52:28] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-13 02:52:28] Monitoring started for /tmp/source2 (wd=1)
+
+[2025-04-13 02:52:28] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-13 02:52:28] Monitoring started for /tmp/source1 (wd=2)
+
