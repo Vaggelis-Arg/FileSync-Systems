@@ -6,6 +6,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 void sync_file(const char *src, const char *dest) {
     // Create parent directory if needed

@@ -54,6 +54,17 @@ void create_named_pipes() {
     printf("Named pipes created\n");
 }
 
+void clean_logs(const char *logfile) {
+    // Truncate existing log file (or remove and recreate)
+    FILE *fp = fopen(logfile, "w");
+    if (fp) {
+        fclose(fp);
+        printf("Cleaned log file: %s\n", logfile);
+    } else {
+        perror("Failed to clean log file");
+    }
+}
+
 SyncInfo* parse_config(const char *filename) {
     FILE *fp = fopen(filename, "r");
     if (!fp) return NULL;
@@ -73,6 +84,64 @@ SyncInfo* parse_config(const char *filename) {
     }
     fclose(fp);
     return head;
+}
+
+void start_worker_with_operation(const char *source, const char *target, 
+	const char *filename, const char *operation) {
+    if (active_workers >= worker_limit) {
+        // Add to queue
+        WorkerTask *new_task = malloc(sizeof(WorkerTask));
+        new_task->source = strdup(source);
+        new_task->target = strdup(target);
+		new_task->filename = strdup(filename);
+		new_task->operation = strdup(operation);
+        new_task->next = task_queue;
+        task_queue = new_task;
+        printf("Worker queue full. Queued operation: %s on %s\n", operation, source);
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Worker process
+        execl("./worker", "worker", source, target, filename, operation, NULL);
+        perror("execl");
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) {
+        active_workers++;
+        printf("Started worker PID: %d for %s (%s)\n", pid, operation, filename);
+    } else {
+        perror("fork");
+    }
+}
+
+void sigchld_handler(int sig) {
+    int status;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        active_workers--;
+        printf("Worker %d exited. Active: %d/%d\n", 
+              pid, active_workers, worker_limit);
+        
+        // Process queued tasks
+        while (task_queue && active_workers < worker_limit) {
+            WorkerTask *task = task_queue;
+            task_queue = task_queue->next;
+            
+            start_worker_with_operation(
+                task->source,
+                task->target,
+                task->filename,
+                task->operation
+            );
+            
+            free(task->source);
+            free(task->target);
+            free(task->filename);
+            free(task->operation);
+            free(task);
+        }
+    }
 }
 
 void setup_inotify() {
@@ -129,64 +198,6 @@ void handle_inotify_events() {
     }
 }
 
-void start_worker_with_operation(const char *source, const char *target, 
-	const char *filename, const char *operation) {
-    if (active_workers >= worker_limit) {
-        // Add to queue
-        WorkerTask *new_task = malloc(sizeof(WorkerTask));
-        new_task->source = strdup(source);
-        new_task->target = strdup(target);
-		new_task->filename = strdup(filename);
-		new_task->operation = strdup(operation);
-        new_task->next = task_queue;
-        task_queue = new_task;
-        printf("Worker queue full. Queued operation: %s on %s\n", operation, source);
-        return;
-    }
-
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Worker process
-        execl("./worker", "worker", source, target, filename, operation, NULL);
-        perror("execl");
-        exit(EXIT_FAILURE);
-    } else if (pid > 0) {
-        active_workers++;
-        printf("Started worker PID: %d for %s (%s)\n", pid, operation, filename);
-    } else {
-        perror("fork");
-    }
-}
-
-void sigchld_handler(int sig) {
-    int status;
-    pid_t pid;
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        active_workers--;
-        printf("Worker %d exited. Active: %d/%d\n", 
-              pid, active_workers, worker_limit);
-        
-        // Process queued tasks
-        while (task_queue && active_workers < worker_limit) {
-            WorkerTask *task = task_queue;
-            task_queue = task_queue->next;
-            
-            start_worker_with_operation(
-                task->source, 
-                task->target,
-                task->filename,
-                task->operation
-            );
-            
-            free(task->source);
-            free(task->target);
-            free(task->filename);
-            free(task->operation);
-            free(task);
-        }
-    }
-}
-
 void log_message(const char *logfile, const char *message) {
     FILE *fp = fopen(logfile, "a");
     if (!fp) return;
@@ -239,6 +250,7 @@ int main(int argc, char *argv[]) {
     }
 
     create_named_pipes();
+	clean_logs(logfile);
     SyncInfo *config = parse_config(config_file);
     setup_inotify();
     signal(SIGCHLD, sigchld_handler);
@@ -253,8 +265,8 @@ int main(int argc, char *argv[]) {
         
         start_worker_with_operation(
 			current->source, 
-			current->target, 
-			"ALL", 
+			current->target,
+			"ALL",
 			"FULL"
 		);
         current = current->next;
