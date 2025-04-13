@@ -198,6 +198,89 @@ void log_message(const char *logfile, const char *message) {
     fclose(fp);
 }
 
+void process_command(const char *command, const char *logfile) {
+    char cmd[32], source[256], target[256];
+    if (sscanf(command, "%s %s %s", cmd, source, target) < 2) {
+        return;
+    }
+
+    if (strcmp(cmd, "add") == 0) {
+        // Check if already exists
+        SyncInfo *current = config;
+        while (current) {
+            if (strcmp(current->source, source) == 0) {
+                printf("Already in queue: %s\n", source);
+                return;
+            }
+            current = current->next;
+        }
+
+        // Add new sync info
+        SyncInfo *new_node = malloc(sizeof(SyncInfo));
+        new_node->source = strdup(source);
+        new_node->target = strdup(target);
+        new_node->active = 1;
+        new_node->next = config;
+        config = new_node;
+
+        // Log and start worker
+        char log_msg[1024];
+        snprintf(log_msg, sizeof(log_msg), "Added directory: %s -> %s", source, target);
+        log_message(logfile, log_msg);
+
+		// Add inotify watch
+        new_node->wd = inotify_add_watch(inotify_fd, new_node->source, 
+			IN_CREATE | IN_MODIFY | IN_DELETE);
+		if (new_node->wd == -1) {
+			printf("Failed to watch %s\n", new_node->source);
+			snprintf(log_msg, sizeof(log_msg), "Failed to watch %s", new_node->source);
+        	log_message(logfile, log_msg);
+		} else {
+			printf("Monitoring started for %s (wd=%d)\n", new_node->source, new_node->wd);
+			snprintf(log_msg, sizeof(log_msg), "Monitoring started for %s (wd=%d)", new_node->source, new_node->wd);
+        	log_message(logfile, log_msg);
+		}
+        
+        start_worker_with_operation(source, target, "ALL", "FULL");
+    }
+    else if (strcmp(cmd, "cancel") == 0) {
+        SyncInfo *current = config;
+        while (current) {
+            if (strcmp(current->source, source) == 0) {
+                current->active = 0;
+                inotify_rm_watch(inotify_fd, current->wd);
+                
+                char log_msg[512];
+                printf("Monitoring stopped for %s\n", source);
+				snprintf(log_msg, sizeof(log_msg), "Monitoring stopped for %s", source);
+                log_message(logfile, log_msg);
+                return;
+            }
+            current = current->next;
+        }
+        printf("Directory not monitored: %s\n", source);
+    }
+    else if (strcmp(cmd, "sync") == 0) {
+        SyncInfo *current = config;
+        while (current) {
+            if (strcmp(current->source, source) == 0 && current->active) {
+                char log_msg[512];
+                snprintf(log_msg, sizeof(log_msg), "Syncing directory: %s -> %s", source, current->target);
+                log_message(logfile, log_msg);
+                
+                start_worker_with_operation(source, current->target, "ALL", "FULL");
+                return;
+            }
+            current = current->next;
+        }
+        printf("Directory not monitored: %s\n", source);
+    }
+    else if (strcmp(cmd, "shutdown") == 0) {
+        printf("Shutting down manager...\n");
+        exit(EXIT_SUCCESS);
+    }
+}
+
 int main(int argc, char *argv[]) {
     char *logfile = "manager.log";
     char *config_file = NULL;
@@ -255,11 +338,11 @@ int main(int argc, char *argv[]) {
 			IN_CREATE | IN_MODIFY | IN_DELETE);
 		if (current->wd == -1) {
 			printf("Failed to watch %s\n", current->source);
-			snprintf(log_buffer, sizeof(log_buffer), "Failed to watch %s\n", current->source);
+			snprintf(log_buffer, sizeof(log_buffer), "Failed to watch %s", current->source);
         	log_message(logfile, log_buffer);
 		} else {
 			printf("Monitoring started for %s (wd=%d)\n", current->source, current->wd);
-			snprintf(log_buffer, sizeof(log_buffer), "Monitoring started for %s (wd=%d)\n", current->source, current->wd);
+			snprintf(log_buffer, sizeof(log_buffer), "Monitoring started for %s (wd=%d)", current->source, current->wd);
         	log_message(logfile, log_buffer);
 		}
         
@@ -272,6 +355,30 @@ int main(int argc, char *argv[]) {
         current = current->next;
     }
 
-    // Main loop would go here
-    while (1) pause();  // Temporary placeholder
+    int fss_in_fd = open("fss_in", O_RDONLY | O_NONBLOCK);
+	int fss_out_fd = open("fss_out", O_WRONLY);
+
+	fd_set read_fds;
+	while (1) {
+		FD_ZERO(&read_fds);
+		FD_SET(fss_in_fd, &read_fds);
+		FD_SET(inotify_fd, &read_fds);
+
+		int max_fd = (fss_in_fd > inotify_fd) ? fss_in_fd : inotify_fd;
+		select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+
+		if (FD_ISSET(inotify_fd, &read_fds)) {
+			handle_inotify_events();
+		}
+
+		if (FD_ISSET(fss_in_fd, &read_fds)) {
+			char command[256];
+			ssize_t bytes = read(fss_in_fd, command, sizeof(command));
+			if (bytes > 0) {
+				process_command(command, logfile);
+				// Write response to fss_out
+				dprintf(fss_out_fd, "Processed: %s", command);
+			}
+		}
+	}
 }
