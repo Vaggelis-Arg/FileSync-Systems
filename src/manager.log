@@ -1,6 +1,4 @@
-[2025-04-14 00:16:23] Added directory: /tmp/source2 -> /tmp/target2
-[2025-04-14 00:16:23] Monitoring started for /tmp/source2 (wd=1)
-[2025-04-14 00:16:23] Added directory: /tmp/source1 -> /tmp/target1
-[2025-04-14 00:16:23] Monitoring started for /tmp/source1 (wd=2)
-[2025-04-14 00:19:22] Added directory: /tmp/source3 -> /tmp/target3
-[2025-04-14 00:19:22] Failed to watch /tmp/source3
+[2025-04-14 01:28:03] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-14 01:28:03] Monitoring started for /tmp/source1 (wd=1)
+[2025-04-14 01:28:22] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-14 01:28:22] Monitoring started for /tmp/source2 (wd=2)
