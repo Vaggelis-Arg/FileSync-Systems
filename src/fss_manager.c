@@ -198,7 +198,7 @@ void log_message(const char *logfile, const char *message) {
     fclose(fp);
 }
 
-void process_command(const char *command, const char *logfile) {
+void process_command(const char *command, const char *logfile, int fss_in_fd, int fss_out_fd) {
     char cmd[32], source[256], target[256];
     if (sscanf(command, "%s %s %s", cmd, source, target) < 2) {
         return;
@@ -243,6 +243,56 @@ void process_command(const char *command, const char *logfile) {
         
         start_worker_with_operation(source, target, "ALL", "FULL");
     }
+	else if (strcmp(cmd, "status") == 0) {
+		time_t now = time(NULL);
+		struct tm *t = localtime(&now);
+		
+		// Log the status request to manager's log
+		char log_msg[512];
+		snprintf(log_msg, sizeof(log_msg), "[%04d-%02d-%02d %02d:%02d:%02d] Status requested for %s",
+				 t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+				 t->tm_hour, t->tm_min, t->tm_sec, source);
+		log_message(logfile, log_msg);
+	
+		SyncInfo *current = config;
+		int found = 0;
+		while (current) {
+			if (strcmp(current->source, source) == 0) {
+				found = 1;
+				// Prepare status response
+				char response[1024];
+				time_t last = current->last_sync;
+				struct tm *last_t = localtime(&last);
+				snprintf(response, sizeof(response),
+						 "[%04d-%02d-%02d %02d:%02d:%02d] Status requested for %s\n"
+						 "Directory: %s\n"
+						 "Target: %s\n"
+						 "Last Sync: %04d-%02d-%02d %02d:%02d:%02d\n"
+						 "Errors: %d\n"
+						 "Status: %s",
+						 t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+						 t->tm_hour, t->tm_min, t->tm_sec, source,
+						 current->source, current->target,
+						 last_t->tm_year + 1900, last_t->tm_mon + 1, last_t->tm_mday,
+						 last_t->tm_hour, last_t->tm_min, last_t->tm_sec,
+						 current->error_count,
+						 current->active ? "Active" : "Inactive");
+				write(fss_out_fd, response, strlen(response));
+				break;
+			}
+			current = current->next;
+		}
+		
+		if (!found) {
+			// Directory not monitored
+			char response[512];
+			snprintf(response, sizeof(response), 
+					 "[%04d-%02d-%02d %02d:%02d:%02d] Directory not monitored: %s",
+					 t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+					 t->tm_hour, t->tm_min, t->tm_sec, source);
+			write(fss_out_fd, response, strlen(response));
+		}
+	}
     else if (strcmp(cmd, "cancel") == 0) {
         SyncInfo *current = config;
         while (current) {
@@ -394,7 +444,7 @@ int main(int argc, char *argv[]) {
 			char command[256];
 			ssize_t bytes = read(fss_in_fd, command, sizeof(command));
 			if (bytes > 0) {
-				process_command(command, logfile);
+				process_command(command, logfile, fss_in_fd, fss_out_fd);
 				// Write response to fss_out
 				dprintf(fss_out_fd, "Processed: %s", command);
 			}
