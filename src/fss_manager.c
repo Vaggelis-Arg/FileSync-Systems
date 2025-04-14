@@ -276,9 +276,28 @@ void process_command(const char *command, const char *logfile) {
         printf("Directory not monitored: %s\n", source);
     }
     else if (strcmp(cmd, "shutdown") == 0) {
-        printf("Shutting down manager...\n");
-        exit(EXIT_SUCCESS);
-    }
+		printf("Shutting down manager...\n");
+		log_message(logfile, "Shutting down manager");
+	
+		// Wait for active workers
+		printf("Waiting for active workers to finish...\n");
+		while (active_workers > 0) {
+			sleep(1); // Simplified waiting
+		}
+	
+		// Process queued tasks
+		printf("Processing remaining tasks...\n");
+		while (task_queue) {
+			WorkerTask *task = task_queue;
+			start_worker_with_operation(task->source, task->target, task->filename, task->operation);
+			// Remove from queue
+			task_queue = task->next;
+			free(task);
+		}
+	
+		// Cleanup config and exit
+		exit(EXIT_SUCCESS);
+	}
 }
 
 int main(int argc, char *argv[]) {

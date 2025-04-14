@@ -1,4 +1,5 @@
-[2025-04-14 01:28:03] Added directory: /tmp/source1 -> /tmp/target1
-[2025-04-14 01:28:03] Monitoring started for /tmp/source1 (wd=1)
-[2025-04-14 01:28:22] Added directory: /tmp/source2 -> /tmp/target2
-[2025-04-14 01:28:22] Monitoring started for /tmp/source2 (wd=2)
+[2025-04-14 15:34:58] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-14 15:34:58] Monitoring started for /tmp/source2 (wd=1)
+[2025-04-14 15:34:58] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-14 15:34:58] Monitoring started for /tmp/source1 (wd=2)
+[2025-04-14 15:35:38] Shutting down manager
