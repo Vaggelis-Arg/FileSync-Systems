@@ -1,2 +1,34 @@
-[2025-04-14 01:31:57] Command add /tmp/source1 /tmp/target1
-[2025-04-14 15:35:38] Command shutdown
+[2025-04-15 19:24:34] Command add /tmp/source3 /tmp/target3
+[2025-04-15 19:27:29] Command add /tmp/source3 /tmp/target3
+[2025-04-15 19:28:52] Command cancel /tmp/source3
+[2025-04-15 19:29:00] Command shutdown
+[2025-04-15 20:55:31] Command add /tmp/source1 /tmp/target1
+[2025-04-15 20:58:45] Command add /tmp/source2 /tmp/target2
+[2025-04-15 21:03:19] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:07:20] Command status /tmp/source1
+[2025-04-15 21:07:51] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:08:32] Command cancel /tmp/source1
+[2025-04-15 21:08:50] Command status /tmp/source1
+[2025-04-15 21:09:09] Command shutdown
+[2025-04-15 21:19:01] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:19:13] Command status /tmp/source3
+[2025-04-15 21:24:11] Command add /tmp/source4 /tmp/target4
+[2025-04-15 21:29:15] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:29:34] Command add /tmp/source4 /tmp/target4
+[2025-04-15 21:31:02] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:31:19] Command add /tmp/source4 /tmp/target4
+[2025-04-15 21:37:44] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:38:21] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:39:14] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:39:53] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:40:21] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:40:24] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:40:30] Command add /tmp/source3 /tmp/target3
+[2025-04-15 21:40:49] Command add /tmp/source4 /tmp/target4
+[2025-04-15 22:17:44] Command add /tmp/source3 /tmp/target3
+[2025-04-15 22:17:50] Command add /tmp/source3 /tmp/target3
+[2025-04-15 22:54:24] Command add /tmp/source3 /tmp/target3
+[2025-04-15 22:55:23] Command add /tmp/source3 /tmp/target3
+[2025-04-15 23:26:38] Command add /tmp/source3 /tmp/target3
+[2025-04-15 23:26:41] Command add /tmp/source3 /tmp/target3
+[2025-04-15 23:26:53] Command shutdown
