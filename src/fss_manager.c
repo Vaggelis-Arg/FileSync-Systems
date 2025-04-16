@@ -209,7 +209,7 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
     // Format timestamp for logging
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
     
-    if (sscanf(command, "%s %s %s", cmd, source, target) < 2) {
+    if (sscanf(command, "%s %s %s", cmd, source, target) < 1) {
         // Handle invalid command format
         snprintf(response, sizeof(response), 
                 "[%s] Invalid command format\n", timestamp);
@@ -245,21 +245,19 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         log_message(logfile, log_msg);
         
         snprintf(response, sizeof(response),
-                "[%s] Added directory: %s -> %s\n"
-                "[%s] Monitoring started for %s\n",
-                timestamp, source, target,
-                timestamp, source);
+                "[%s] Added directory: %s -> %s\n",
+                timestamp, source, target);
         write(fss_out_fd, response, strlen(response));
 
         // Add inotify watch
         new_node->wd = inotify_add_watch(inotify_fd, new_node->source, 
                 IN_CREATE | IN_MODIFY | IN_DELETE);
         if (new_node->wd == -1) {
-            snprintf(log_msg, sizeof(log_msg), "Failed to watch %s", new_node->source);
+            snprintf(log_msg, sizeof(log_msg), "Failed to monitor %s", new_node->source);
             log_message(logfile, log_msg);
             
             snprintf(response, sizeof(response),
-                    "[%s] Failed to watch %s\n", timestamp, new_node->source);
+                    "[%s] Failed to monitor %s\n", timestamp, new_node->source);
             write(fss_out_fd, response, strlen(response));
         } else {
             snprintf(log_msg, sizeof(log_msg), 
@@ -460,8 +458,8 @@ int main(int argc, char *argv[]) {
 		current->wd = inotify_add_watch(inotify_fd, current->source, 
 			IN_CREATE | IN_MODIFY | IN_DELETE);
 		if (current->wd == -1) {
-			printf("Failed to watch %s\n", current->source);
-			snprintf(log_buffer, sizeof(log_buffer), "Failed to watch %s", current->source);
+			printf("Failed to monitor %s\n", current->source);
+			snprintf(log_buffer, sizeof(log_buffer), "Failed to monitor %s", current->source);
         	log_message(logfile, log_buffer);
 		} else {
 			printf("Monitoring started for %s (wd=%d)\n", current->source, current->wd);
@@ -481,11 +479,8 @@ int main(int argc, char *argv[]) {
     // Open pipes - use blocking mode for both
     int fss_in_fd = open("fss_in", O_RDONLY);
     int fss_out_fd = open("fss_out", O_WRONLY);
-    
-    // Keep a write end open to prevent EOF on read end
-    int dummy_fd = open("fss_in", O_WRONLY | O_NONBLOCK);
 
-    if (fss_in_fd == -1 || fss_out_fd == -1 || dummy_fd == -1) {
+    if (fss_in_fd == -1 || fss_out_fd == -1) {
         perror("Failed to open pipes");
         exit(EXIT_FAILURE);
     }
