@@ -32,3 +32,7 @@
 [2025-04-15 23:26:38] Command add /tmp/source3 /tmp/target3
 [2025-04-15 23:26:41] Command add /tmp/source3 /tmp/target3
 [2025-04-15 23:26:53] Command shutdown
+[2025-04-16 11:58:17] Command: add /tmp/source3 /tmp/target3
+[2025-04-16 11:58:34] Command: shutdown
+[2025-04-16 11:59:32] Command: sync /tmp/source1 /tmp/target1
+[2025-04-16 12:00:00] Command: add /tmp/source4 /tmp/target4

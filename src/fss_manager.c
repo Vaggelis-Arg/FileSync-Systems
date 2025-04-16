@@ -478,29 +478,53 @@ int main(int argc, char *argv[]) {
         current = current->next;
     }
 
-    int fss_in_fd = open("fss_in", O_RDWR);
-	int fss_out_fd = open("fss_out", O_WRONLY);
+    // Open pipes - use blocking mode for both
+    int fss_in_fd = open("fss_in", O_RDONLY);
+    int fss_out_fd = open("fss_out", O_WRONLY);
+    
+    // Keep a write end open to prevent EOF on read end
+    int dummy_fd = open("fss_in", O_WRONLY | O_NONBLOCK);
 
-	fd_set read_fds;
-	while (1) {
-		FD_ZERO(&read_fds);
-		FD_SET(fss_in_fd, &read_fds);
-		FD_SET(inotify_fd, &read_fds);
+    if (fss_in_fd == -1 || fss_out_fd == -1 || dummy_fd == -1) {
+        perror("Failed to open pipes");
+        exit(EXIT_FAILURE);
+    }
 
-		int max_fd = (fss_in_fd > inotify_fd) ? fss_in_fd : inotify_fd;
-		select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+    fd_set read_fds;
+    while (1) {
+        FD_ZERO(&read_fds);
+        FD_SET(fss_in_fd, &read_fds);
+        FD_SET(inotify_fd, &read_fds);
 
-		if (FD_ISSET(inotify_fd, &read_fds)) {
-			handle_inotify_events();
-		}
+        int max_fd = (fss_in_fd > inotify_fd) ? fss_in_fd : inotify_fd;
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+            perror("select");
+            continue;
+        }
 
-		if (FD_ISSET(fss_in_fd, &read_fds)) {
-			char command[256];
-			ssize_t bytes = read(fss_in_fd, command, sizeof(command)-1);
-			if (bytes > 0) {
-				command[bytes] = '\0';
-				process_command(command, logfile, fss_in_fd, fss_out_fd);
-			}
-		}
-	}
+        if (FD_ISSET(inotify_fd, &read_fds)) {
+            handle_inotify_events();
+        }
+
+        if (FD_ISSET(fss_in_fd, &read_fds)) {
+            char command[256];
+            ssize_t bytes = read(fss_in_fd, command, sizeof(command) - 1);
+            if (bytes > 0) {
+                command[bytes] = '\0';
+                // Remove trailing newline if present
+                if (command[strlen(command)-1] == '\n') {
+                    command[strlen(command)-1] = '\0';
+                }
+                process_command(command, logfile, fss_in_fd, fss_out_fd);
+            } else if (bytes == 0) {
+                // Pipe was closed - reopen it
+                close(fss_in_fd);
+                fss_in_fd = open("fss_in", O_RDONLY);
+                if (fss_in_fd == -1) {
+                    perror("Failed to reopen fss_in");
+                    sleep(1); // Wait before retrying
+                }
+            }
+        }
+    }
 }
