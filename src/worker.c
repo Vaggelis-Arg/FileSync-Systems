@@ -7,8 +7,34 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <time.h>
 
-void print_report(const char *status, const char *details, const char *errors) {
+void print_report(const char *status, const char *details, const char *errors,
+	const char *source, const char *target, const char *operation) {
+    int fss_out_fd = open("fss_out", O_WRONLY);
+    if (fss_out_fd == -1) {
+        perror("worker failed to open fss_out");
+        return;
+    }
+    
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char timestamp[20];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
+    
+    char report[1024];
+	snprintf(report, sizeof(report), 
+		"[%s] [WORKER_REPORT] [%s] [%s] [%d] [%s] [%s] [%s]\n",
+		timestamp, source, target,
+		getpid(), operation, status, details);
+
+	ssize_t written = write(fss_out_fd, report, strlen(report));
+	if (written == -1) {
+		perror("Failed to write report to fss_out");
+	}
+    
+    close(fss_out_fd);
+    
     printf("----------------------------------------------------\n");
     printf("EXEC_REPORT_START\n");
     printf("STATUS: %s\n", status);
@@ -106,13 +132,13 @@ int main(int argc, char *argv[]) {
         
         if (error_count == 0) {
             snprintf(details, sizeof(details), "%d files copied", success_count);
-            print_report("SUCCESS", details, NULL);
+            print_report("SUCCESS", details, NULL, source, target, operation);
         } else if (success_count > 0) {
             snprintf(details, sizeof(details), "%d files copied, %d skipped", success_count, error_count);
-            print_report("PARTIAL", details, error_buffer);
+            print_report("PARTIAL", details, error_buffer, source, target, operation);
         } else {
             snprintf(details, sizeof(details), "0 files copied, %d skipped", error_count);
-            print_report("ERROR", details, error_buffer);
+            print_report("ERROR", details, error_buffer, source, target, operation);
         }
     } 
     else {
@@ -123,23 +149,23 @@ int main(int argc, char *argv[]) {
         if (strcmp(operation, "ADDED") == 0 || strcmp(operation, "MODIFIED") == 0) {
             if (sync_file(src_path, dest_path) == 0) {
                 snprintf(details, sizeof(details), "File: %s", filename);
-                print_report("SUCCESS", details, NULL);
+                print_report("SUCCESS", details, NULL, source, target, operation);
             } else {
                 char error_msg[512];
                 snprintf(error_msg, sizeof(error_msg), "- File %s: %s", filename, strerror(errno));
                 snprintf(details, sizeof(details), "File: %s", filename);
-                print_report("ERROR", details, error_msg);
+                print_report("ERROR", details, error_msg, source, target, operation);
             }
         } 
         else if (strcmp(operation, "DELETED") == 0) {
             if (unlink(dest_path) == 0) {
                 snprintf(details, sizeof(details), "File: %s", filename);
-                print_report("SUCCESS", details, NULL);
+                print_report("SUCCESS", details, NULL, source, target, operation);
             } else {
                 char error_msg[512];
                 snprintf(error_msg, sizeof(error_msg), "- File %s: %s", filename, strerror(errno));
                 snprintf(details, sizeof(details), "File: %s", filename);
-                print_report("ERROR", details, error_msg);
+                print_report("ERROR", details, error_msg, source, target, operation);
             }
         }
     }

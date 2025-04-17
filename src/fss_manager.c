@@ -18,6 +18,9 @@ typedef struct SyncInfo {
     time_t last_sync;
     int active;
     int error_count;
+	pid_t last_worker_pid;
+    char *last_operation;
+    char *last_worker_details;
     struct SyncInfo *next;
 } SyncInfo;
 
@@ -111,6 +114,18 @@ void start_worker_with_operation(const char *source, const char *target,
     } else if (pid > 0) {
         active_workers++;
         printf("Started worker PID: %d for %s (%s)\n", pid, operation, filename);
+        
+        // Track worker in SyncInfo
+        SyncInfo *current = config;
+        while (current) {
+            if (strcmp(current->source, source) == 0) {
+                current->last_worker_pid = pid;
+                if (current->last_operation) free(current->last_operation);
+                current->last_operation = strdup(operation);
+                break;
+            }
+            current = current->next;
+        }
     } else {
         perror("fork");
     }
@@ -123,6 +138,22 @@ void sigchld_handler(int sig) {
         active_workers--;
         printf("Worker %d exited. Active: %d/%d\n", 
               pid, active_workers, worker_limit);
+
+		// Find and update the worker's sync info
+        SyncInfo *current = config;
+        while (current) {
+            if (current->last_worker_pid == pid) {
+                // Update last sync time
+                current->last_sync = time(NULL);
+                
+                // Update error count if worker failed
+                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                    current->error_count++;
+                }
+                break;
+            }
+            current = current->next;
+        }
         
         // Process queued tasks
         while (task_queue && active_workers < worker_limit) {
@@ -197,6 +228,23 @@ void log_message(const char *logfile, const char *message) {
             t->tm_year+1900, t->tm_mon+1, t->tm_mday,
             t->tm_hour, t->tm_min, t->tm_sec, message);
     fclose(fp);
+}
+
+void log_sync_result(const char *logfile, const char *source, const char *target,
+	pid_t worker_pid, const char *operation, const char *result,
+	const char *details) {
+	FILE *fp = fopen(logfile, "a");
+	if (!fp) return;
+
+	time_t now = time(NULL);
+	struct tm *t = localtime(&now);
+
+	fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%s] [%s] [%d] [%s] [%s] [%s]\n",
+	t->tm_year+1900, t->tm_mon+1, t->tm_mday,
+	t->tm_hour, t->tm_min, t->tm_sec,
+	source, target, worker_pid, operation, result, details);
+
+	fclose(fp);
 }
 
 void process_command(const char *command, const char *logfile, int fss_in_fd, int fss_out_fd) {
@@ -516,11 +564,11 @@ int main(int argc, char *argv[]) {
         current = current->next;
     }
 
-    // Open pipes - use blocking mode for both
     int fss_in_fd = open("fss_in", O_RDONLY);
     int fss_out_fd = open("fss_out", O_WRONLY);
+    int fss_report_fd = open("fss_out", O_RDONLY | O_NONBLOCK);
 
-    if (fss_in_fd == -1 || fss_out_fd == -1) {
+    if (fss_in_fd == -1 || fss_out_fd == -1 || fss_report_fd == -1) {
         perror("Failed to open pipes");
         exit(EXIT_FAILURE);
     }
@@ -530,8 +578,11 @@ int main(int argc, char *argv[]) {
         FD_ZERO(&read_fds);
         FD_SET(fss_in_fd, &read_fds);
         FD_SET(inotify_fd, &read_fds);
+		FD_SET(fss_report_fd, &read_fds);
 
-        int max_fd = (fss_in_fd > inotify_fd) ? fss_in_fd : inotify_fd;
+        int max_fd = fss_in_fd > inotify_fd ? fss_in_fd : inotify_fd;
+        if (fss_report_fd > max_fd) max_fd = fss_report_fd;
+
         if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
             perror("select");
             continue;
@@ -561,5 +612,44 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-    }
+
+		if (FD_ISSET(fss_report_fd, &read_fds)) {
+			char report[1024];
+			ssize_t bytes = read(fss_report_fd, report, sizeof(report) - 1);
+			
+			if (bytes > 0) {
+				report[bytes] = '\0';
+				char *worker_tag = strstr(report, "[WORKER_REPORT]");
+				if (worker_tag) {
+					// Parse worker report
+					char timestamp[32], source_dir[256], target_dir[256];
+					int worker_pid;
+					char operation[20], status[20], details[256];
+					
+					if (sscanf(report, "[%31[^]]] [%*[^]]] [%255[^]]] [%255[^]]] [%d] [%19[^]]] [%19[^]]] [%255[^]]]",
+							timestamp, source_dir, target_dir, &worker_pid, 
+							operation, status, details) >= 6) {
+						
+						// Log the result
+						log_sync_result(logfile, source_dir, target_dir, 
+									  worker_pid, operation, status, details);
+						
+						// Update sync info with details
+						SyncInfo *current = config;
+						while (current) {
+							if (current->last_worker_pid == worker_pid) {
+								if (current->last_worker_details) 
+									free(current->last_worker_details);
+								current->last_worker_details = strdup(details);
+								break;
+							}
+							current = current->next;
+						}
+					} else {
+						fprintf(stderr, "Failed to parse worker report: %s\n", report);
+					}
+				}
+			}
+		}
+	}
 }
