@@ -1,0 +1,10 @@
+[2025-04-17 12:32:30] Added directory: /tmp/source2 -> /tmp/target2
+[2025-04-17 12:32:30] Failed to monitor /tmp/source2
+[2025-04-17 12:32:30] Added directory: /tmp/source1 -> /tmp/target1
+[2025-04-17 12:32:30] Failed to monitor /tmp/source1
+[2025-04-17 12:33:37] Added directory: /home/vaggelisarg/FileSync-System/data -> /home/vaggelisarg/FileSync-System/data-temp
+[2025-04-17 12:33:37] Monitoring started for /home/vaggelisarg/FileSync-System/data (wd=1)
+[2025-04-17 12:33:58] Status requested for /home/vaggelisarg/FileSync-System/data
+[2025-04-17 12:34:18] Syncing directory: /home/vaggelisarg/FileSync-System/data -> /home/vaggelisarg/FileSync-System/data-temp
+[2025-04-17 12:34:40] Monitoring stopped for /home/vaggelisarg/FileSync-System/data
+[2025-04-17 12:34:52] Shutting down manager

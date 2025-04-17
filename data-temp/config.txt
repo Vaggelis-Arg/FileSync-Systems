@@ -1,0 +1,2 @@
+/tmp/source1 /tmp/target1
+/tmp/source2 /tmp/target2

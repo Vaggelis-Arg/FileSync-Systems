@@ -59,3 +59,10 @@
 [2025-04-16 12:30:00] Command: add /tmp/source3 /tmp/target3
 [2025-04-16 12:30:07] Command: 
 [2025-04-16 12:30:12] Command: shutdown
+[2025-04-16 22:36:40] Command: add /home/vaggelisarg/FileSync-System/data /home/vaggelisarg/FileSync-System/data-temp
+[2025-04-16 22:37:09] Command: status /home/vaggelisarg/FileSync-System/data
+[2025-04-16 22:37:19] Command: shutdown
+[2025-04-16 22:37:26] Command: aa
+[2025-04-16 22:41:19] Command: add /home/vaggelisarg/FileSync-System/data /home/vaggelisarg/FileSync-System/data-temp
+[2025-04-16 22:41:34] Command: status /home/vaggelisarg/FileSync-System/data
+[2025-04-16 22:41:47] Command: shutdown

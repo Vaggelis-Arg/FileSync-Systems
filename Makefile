@@ -1,26 +1,40 @@
 CC = gcc
-CFLAGS = -Wall -Werror -std=gnu11
-BIN_DIR = bin
+CFLAGS = -Wall -Werror -O2 -g
+LDFLAGS = 
+
 SRC_DIR = src
-SCRIPTS_DIR = scripts
+OBJ_DIR = build
 
-all: directories fss_manager fss_console worker fss_script
+CONSOLE_SRC = $(SRC_DIR)/fss_console.c
+MANAGER_SRC = $(SRC_DIR)/fss_manager.c
+WORKER_SRC = $(SRC_DIR)/worker.c
+COMMON_SRC = $(SRC_DIR)/sync_list.c
 
-directories:
-	mkdir -p $(BIN_DIR) logs pipes
+CONSOLE_OBJ = $(OBJ_DIR)/fss_console.o $(OBJ_DIR)/sync_list.o
+MANAGER_OBJ = $(OBJ_DIR)/fss_manager.o $(OBJ_DIR)/sync_list.o
+WORKER_OBJ = $(OBJ_DIR)/worker.o
 
-fss_manager: $(SRC_DIR)/fss_manager.c $(SRC_DIR)/utils.h
-	$(CC) $(CFLAGS) -o $(BIN_DIR)/fss_manager $(SRC_DIR)/fss_manager.c -lrt
+BINARIES = fss_console fss_manager worker
 
-fss_console: $(SRC_DIR)/fss_console.c $(SRC_DIR)/utils.h
-	$(CC) $(CFLAGS) -o $(BIN_DIR)/fss_console $(SRC_DIR)/fss_console.c
+.PHONY: all clean
 
-worker: $(SRC_DIR)/worker.c $(SRC_DIR)/utils.h
-	$(CC) $(CFLAGS) -o $(BIN_DIR)/worker $(SRC_DIR)/worker.c
+all: $(BINARIES)
 
-fss_script:
-	cp $(SCRIPTS_DIR)/fss_script.sh $(BIN_DIR)/fss_script.sh
-	chmod +x $(BIN_DIR)/fss_script.sh
+# Create build directory if it doesn't exist
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+fss_console: $(CONSOLE_OBJ)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+fss_manager: $(MANAGER_OBJ)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+worker: $(WORKER_OBJ)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:
-	rm -rf $(BIN_DIR) logs pipes
+	rm -rf $(OBJ_DIR) *.o $(BINARIES)

@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <sys/select.h>
 
 typedef struct SyncInfo {
     char *source;
@@ -213,7 +214,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         // Handle invalid command format
         snprintf(response, sizeof(response), 
                 "[%s] Invalid command format\n", timestamp);
-        write(fss_out_fd, response, strlen(response));
+		ssize_t written = write(fss_out_fd, response, strlen(response));
+		if (written == -1) {
+			perror("write to fss_out_fd failed");
+		}
         return;
     }
 
@@ -224,7 +228,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
             if (strcmp(current->source, source) == 0) {
                 snprintf(response, sizeof(response),
                         "[%s] Already in queue: %s\n", timestamp, source);
-                write(fss_out_fd, response, strlen(response));
+				ssize_t written = write(fss_out_fd, response, strlen(response));
+				if (written == -1) {
+					perror("write to fss_out_fd failed");
+				}
                 return;
             }
             current = current->next;
@@ -247,7 +254,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         snprintf(response, sizeof(response),
                 "[%s] Added directory: %s -> %s\n",
                 timestamp, source, target);
-        write(fss_out_fd, response, strlen(response));
+		ssize_t written = write(fss_out_fd, response, strlen(response));
+		if (written == -1) {
+			perror("write to fss_out_fd failed");
+		}
 
         // Add inotify watch
         new_node->wd = inotify_add_watch(inotify_fd, new_node->source, 
@@ -258,12 +268,18 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
             
             snprintf(response, sizeof(response),
                     "[%s] Failed to monitor %s\n", timestamp, new_node->source);
-            write(fss_out_fd, response, strlen(response));
+			ssize_t written = write(fss_out_fd, response, strlen(response));
+			if (written == -1) {
+				perror("write to fss_out_fd failed");
+			}
         } else {
             snprintf(log_msg, sizeof(log_msg), 
                     "Monitoring started for %s (wd=%d)", new_node->source, new_node->wd);
             log_message(logfile, log_msg);
-			write(fss_out_fd, response, strlen(response));
+			ssize_t written = write(fss_out_fd, response, strlen(response));
+			if (written == -1) {
+				perror("write to fss_out_fd failed");
+			}
     		fsync(fss_out_fd);
         }
         
@@ -297,7 +313,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                         last_sync_time,
                         current->error_count,
                         current->active ? "Active" : "Inactive");
-                write(fss_out_fd, response, strlen(response));
+				ssize_t written = write(fss_out_fd, response, strlen(response));
+				if (written == -1) {
+					perror("write to fss_out_fd failed");
+				}
     			fsync(fss_out_fd);
                 break;
             }
@@ -307,7 +326,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         if (!found) {
             snprintf(response, sizeof(response), 
                     "[%s] Directory not monitored: %s\n", timestamp, source);
-            write(fss_out_fd, response, strlen(response));
+			ssize_t written = write(fss_out_fd, response, strlen(response));
+			if (written == -1) {
+				perror("write to fss_out_fd failed");
+			}
 		    fsync(fss_out_fd);
         }
     }
@@ -324,7 +346,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                 
                 snprintf(response, sizeof(response),
                         "[%s] Monitoring stopped for %s\n", timestamp, source);
-                write(fss_out_fd, response, strlen(response));
+				ssize_t written = write(fss_out_fd, response, strlen(response));
+				if (written == -1) {
+					perror("write to fss_out_fd failed");
+				}
 			    fsync(fss_out_fd);
                 return;
             }
@@ -333,7 +358,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         
         snprintf(response, sizeof(response),
                 "[%s] Directory not monitored: %s\n", timestamp, source);
-        write(fss_out_fd, response, strlen(response));
+		ssize_t written = write(fss_out_fd, response, strlen(response));
+		if (written == -1) {
+			perror("write to fss_out_fd failed");
+		}
 		fsync(fss_out_fd);
     }
     else if (strcmp(cmd, "sync") == 0) {
@@ -347,7 +375,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                 snprintf(response, sizeof(response),
                         "[%s] Syncing directory: %s -> %s\n", 
                         timestamp, source, current->target);
-                write(fss_out_fd, response, strlen(response));
+				ssize_t written = write(fss_out_fd, response, strlen(response));
+				if (written == -1) {
+					perror("write to fss_out_fd failed");
+				}
 			    fsync(fss_out_fd);
                 
                 start_worker_with_operation(source, current->target, "ALL", "FULL");
@@ -358,7 +389,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         
         snprintf(response, sizeof(response),
                 "[%s] Directory not monitored: %s\n", timestamp, source);
-        write(fss_out_fd, response, strlen(response));
+		ssize_t written = write(fss_out_fd, response, strlen(response));
+		if (written == -1) {
+			perror("write to fss_out_fd failed");
+		}
 		fsync(fss_out_fd);
     }
     else if (strcmp(cmd, "shutdown") == 0) {
@@ -371,7 +405,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                 "[%s] Processing remaining tasks...\n"
                 "[%s] Manager shutdown complete\n",
                 timestamp, timestamp, timestamp, timestamp);
-        write(fss_out_fd, response, strlen(response));
+		ssize_t written = write(fss_out_fd, response, strlen(response));
+		if (written == -1) {
+			perror("write to fss_out_fd failed");
+		}
 		fsync(fss_out_fd);
         
         // Wait for active workers
@@ -397,7 +434,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
     else {
         snprintf(response, sizeof(response),
                 "[%s] Unknown command: %s\n", timestamp, cmd);
-        write(fss_out_fd, response, strlen(response));
+		ssize_t written = write(fss_out_fd, response, strlen(response));
+		if (written == -1) {
+			perror("write to fss_out_fd failed");
+		}
 		fsync(fss_out_fd);
     }
 }

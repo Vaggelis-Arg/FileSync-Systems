@@ -8,20 +8,22 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-void print_report(const char *status, const char *details, int errors) {
+void print_report(const char *status, const char *details, const char *errors) {
+    printf("----------------------------------------------------\n");
     printf("EXEC_REPORT_START\n");
     printf("STATUS: %s\n", status);
     printf("DETAILS: %s\n", details);
-    if (errors > 0) {
-        printf("ERRORS: %d\n", errors);
+    if (errors != NULL && strlen(errors) > 0) {
+        printf("ERRORS:\n%s\n", errors);
     }
     printf("EXEC_REPORT_END\n");
+    printf("----------------------------------------------------\n");
 }
 
 int sync_file(const char *src, const char *dest) {
     // Create parent directory if needed
     char path[256];
-    strncpy(path, dest, sizeof(path));
+    snprintf(path, sizeof(path), "%s", dest);
     char *slash = strrchr(path, '/');
     if (slash) {
         *slash = '\0';
@@ -68,9 +70,10 @@ int main(int argc, char *argv[]) {
     const char *filename = argv[3];
     const char *operation = argv[4];
 
-	int success_count = 0;
+    int success_count = 0;
     int error_count = 0;
     char details[1024] = {0};
+    char error_buffer[4096] = {0};
 
     if (strcmp(operation, "FULL") == 0) {
         // Full directory sync
@@ -82,26 +85,34 @@ int main(int argc, char *argv[]) {
 
         struct dirent *entry;
         while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG) {
-                char src_path[1024], dest_path[1024];
-                snprintf(src_path, sizeof(src_path), "%s/%s", source, entry->d_name);
-                snprintf(dest_path, sizeof(dest_path), "%s/%s", target, entry->d_name);
-                
-                if (sync_file(src_path, dest_path) == 0) {
-                    success_count++;
-                } else {
-                    error_count++;
-                }
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+
+            char src_path[1024], dest_path[1024];
+            snprintf(src_path, sizeof(src_path), "%s/%s", source, entry->d_name);
+            snprintf(dest_path, sizeof(dest_path), "%s/%s", target, entry->d_name);
+            
+            if (sync_file(src_path, dest_path) == 0) {
+                success_count++;
+            } else {
+                error_count++;
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "- File %s: %s\n", entry->d_name, strerror(errno));
+                strncat(error_buffer, error_msg, sizeof(error_buffer) - strlen(error_buffer) - 1);
             }
         }
         closedir(dir);
-		
+        
         if (error_count == 0) {
             snprintf(details, sizeof(details), "%d files copied", success_count);
-            print_report("SUCCESS", details, 0);
+            print_report("SUCCESS", details, NULL);
+        } else if (success_count > 0) {
+            snprintf(details, sizeof(details), "%d files copied, %d skipped", success_count, error_count);
+            print_report("PARTIAL", details, error_buffer);
         } else {
-            snprintf(details, sizeof(details), "%d files copied, %d failed", success_count, error_count);
-            print_report("PARTIAL", details, error_count);
+            snprintf(details, sizeof(details), "0 files copied, %d skipped", error_count);
+            print_report("ERROR", details, error_buffer);
         }
     } 
     else {
@@ -112,19 +123,23 @@ int main(int argc, char *argv[]) {
         if (strcmp(operation, "ADDED") == 0 || strcmp(operation, "MODIFIED") == 0) {
             if (sync_file(src_path, dest_path) == 0) {
                 snprintf(details, sizeof(details), "File: %s", filename);
-                print_report("SUCCESS", details, 0);
+                print_report("SUCCESS", details, NULL);
             } else {
-                snprintf(details, sizeof(details), "File: %s - %s", filename, strerror(errno));
-                print_report("ERROR", details, 1);
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "- File %s: %s", filename, strerror(errno));
+                snprintf(details, sizeof(details), "File: %s", filename);
+                print_report("ERROR", details, error_msg);
             }
         } 
         else if (strcmp(operation, "DELETED") == 0) {
             if (unlink(dest_path) == 0) {
                 snprintf(details, sizeof(details), "File: %s", filename);
-                print_report("SUCCESS", details, 0);
+                print_report("SUCCESS", details, NULL);
             } else {
-                snprintf(details, sizeof(details), "File: %s - %s", filename, strerror(errno));
-                print_report("ERROR", details, 1);
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "- File %s: %s", filename, strerror(errno));
+                snprintf(details, sizeof(details), "File: %s", filename);
+                print_report("ERROR", details, error_msg);
             }
         }
     }
