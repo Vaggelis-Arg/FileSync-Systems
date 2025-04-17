@@ -1,7 +1,0 @@
-[2025-04-15 15:09:04] Command status /tmp/source1
-[2025-04-15 15:09:07] Command 
-[2025-04-17 12:33:37] Command: add /home/vaggelisarg/FileSync-System/data /home/vaggelisarg/FileSync-System/data-temp
-[2025-04-17 12:33:58] Command: status /home/vaggelisarg/FileSync-System/data
-[2025-04-17 12:34:18] Command: sync /home/vaggelisarg/FileSync-System/data
-[2025-04-17 12:34:40] Command: cancel /home/vaggelisarg/FileSync-System/data
-[2025-04-17 12:34:52] Command: shutdown
