@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
             perror("write to fss_in failed");
             continue;
         }
-        fsync(fss_in_fd);  // Ensure the command is sent immediately
+        fsync(fss_in_fd);
         
         // Read response
         char response[1024];

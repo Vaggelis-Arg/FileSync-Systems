@@ -298,14 +298,6 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         // Log and respond
         snprintf(log_msg, sizeof(log_msg), "Added directory: %s -> %s", source, target);
         log_message(logfile, log_msg);
-        
-        snprintf(response, sizeof(response),
-                "[%s] Added directory: %s -> %s\n",
-                timestamp, source, target);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1) {
-			perror("write to fss_out_fd failed");
-		}
 
         // Add inotify watch
         new_node->wd = inotify_add_watch(inotify_fd, new_node->source, 
@@ -324,6 +316,9 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
             snprintf(log_msg, sizeof(log_msg), 
                     "Monitoring started for %s (wd=%d)", new_node->source, new_node->wd);
             log_message(logfile, log_msg);
+			snprintf(response, sizeof(response),
+                "[%s] Added directory: %s -> %s\n",
+                timestamp, source, target);
 			ssize_t written = write(fss_out_fd, response, strlen(response));
 			if (written == -1) {
 				perror("write to fss_out_fd failed");
@@ -382,36 +377,53 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         }
     }
     else if (strcmp(cmd, "cancel") == 0) {
-        SyncInfo *current = config;
-        while (current) {
-            if (strcmp(current->source, source) == 0) {
-                current->active = 0;
-                inotify_rm_watch(inotify_fd, current->wd);
-                
-                snprintf(log_msg, sizeof(log_msg), 
-                        "Monitoring stopped for %s", source);
-                log_message(logfile, log_msg);
-                
-                snprintf(response, sizeof(response),
-                        "[%s] Monitoring stopped for %s\n", timestamp, source);
+		SyncInfo *current = config;
+		int found = 0;
+		
+		while (current) {
+			if (strcmp(current->source, source) == 0) {
+				found = 1;
+				if (current->active) {
+					current->active = 0;
+					inotify_rm_watch(inotify_fd, current->wd);
+					
+					// Log to both console and log file
+					snprintf(log_msg, sizeof(log_msg), 
+							"Monitoring stopped for %s", source);
+					log_message(logfile, log_msg);
+					
+					snprintf(response, sizeof(response),
+							"[%s] Monitoring stopped for %s\n", 
+							timestamp, source);
+				} else {
+					// Directory exists but already inactive - console only
+					snprintf(response, sizeof(response),
+							"[%s] Directory not monitored: %s\n", 
+							timestamp, source);
+				}
+				
 				ssize_t written = write(fss_out_fd, response, strlen(response));
 				if (written == -1) {
 					perror("write to fss_out_fd failed");
 				}
-			    fsync(fss_out_fd);
-                return;
-            }
-            current = current->next;
-        }
-        
-        snprintf(response, sizeof(response),
-                "[%s] Directory not monitored: %s\n", timestamp, source);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1) {
-			perror("write to fss_out_fd failed");
+				fsync(fss_out_fd);
+				break;
+			}
+			current = current->next;
 		}
-		fsync(fss_out_fd);
-    }
+		
+		if (!found) {
+			// Directory not found - console only
+			snprintf(response, sizeof(response),
+					"[%s] Directory not monitored: %s\n", 
+					timestamp, source);
+			ssize_t written = write(fss_out_fd, response, strlen(response));
+			if (written == -1) {
+				perror("write to fss_out_fd failed");
+			}
+			fsync(fss_out_fd);
+		}
+	}
     else if (strcmp(cmd, "sync") == 0) {
         SyncInfo *current = config;
         while (current) {
@@ -531,7 +543,7 @@ int main(int argc, char *argv[]) {
 
     create_named_pipes();
 	clean_logs(logfile);
-    SyncInfo *config = parse_config(config_file);
+    config = parse_config(config_file);
     setup_inotify();
     signal(SIGCHLD, sigchld_handler);
 
