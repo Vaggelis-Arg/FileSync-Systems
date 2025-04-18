@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <sys/select.h>
+#include <errno.h>
 
 typedef struct SyncInfo {
     char *source;
@@ -77,9 +78,18 @@ SyncInfo* parse_config(const char *filename) {
     char line[256];
     
     while (fgets(line, sizeof(line), fp)) {
-        char *source = strtok(line, " ");
-        char *target = strtok(NULL, " \n");
+        // Skip empty lines or lines with only whitespace
+        if (strspn(line, " \t\n") == strlen(line)) continue;
+
+        char *source = strtok(line, " \t\n");
+        char *target = strtok(NULL, " \t\n");
         
+        // Skip if source is missing or target is missing
+        if (!source || !target) {
+            fprintf(stderr, "Invalid config line: %s", line);
+            continue;
+        }
+
         SyncInfo *new_node = malloc(sizeof(SyncInfo));
         new_node->source = strdup(source);
         new_node->target = strdup(target);
@@ -555,7 +565,7 @@ int main(int argc, char *argv[]) {
                 current->source, current->target);
         log_message(logfile, log_buffer);
 
-		current->wd = inotify_add_watch(inotify_fd, current->source, 
+		current->wd = inotify_add_watch(inotify_fd, current->source,
 			IN_CREATE | IN_MODIFY | IN_DELETE);
 		if (current->wd == -1) {
 			printf("Failed to monitor %s\n", current->source);
@@ -568,7 +578,7 @@ int main(int argc, char *argv[]) {
 		}
         
         start_worker_with_operation(
-			current->source, 
+			current->source,
 			current->target,
 			"ALL",
 			"FULL"
@@ -596,6 +606,9 @@ int main(int argc, char *argv[]) {
         if (fss_report_fd > max_fd) max_fd = fss_report_fd;
 
         if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+			if (errno == EINTR) {
+				continue;
+			}
             perror("select");
             continue;
         }

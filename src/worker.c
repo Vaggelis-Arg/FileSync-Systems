@@ -26,7 +26,7 @@ void print_report(const char *status, const char *details, const char *errors,
 	snprintf(report, sizeof(report), 
 		"[%s] [WORKER_REPORT] [%s] [%s] [%d] [%s] [%s] [%s]\n",
 		timestamp, source, target,
-		getpid(), operation, status, details);
+		getpid(), operation, status, strcmp(status, "ERROR") ? details : errors);
 
 	ssize_t written = write(fss_out_fd, report, strlen(report));
 	if (written == -1) {
@@ -124,7 +124,7 @@ int main(int argc, char *argv[]) {
             } else {
                 error_count++;
                 char error_msg[512];
-                snprintf(error_msg, sizeof(error_msg), "- File %s: %s\n", entry->d_name, strerror(errno));
+                snprintf(error_msg, sizeof(error_msg), "- File %s: %s", entry->d_name, strerror(errno));
                 strncat(error_buffer, error_msg, sizeof(error_buffer) - strlen(error_buffer) - 1);
             }
         }
