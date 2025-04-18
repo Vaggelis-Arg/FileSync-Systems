@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
     
     // Open pipes once at startup
     int fss_in_fd = open("fss_in", O_WRONLY);
-    int fss_out_fd = open("fss_out", O_RDONLY);
+    int fss_out_fd = open("fss_out", O_RDONLY | O_NONBLOCK);
     
     if (fss_in_fd == -1 || fss_out_fd == -1) {
         perror("Failed to open pipes");
@@ -57,20 +57,14 @@ int main(int argc, char *argv[]) {
         // Read response
         char response[1024];
         ssize_t bytes;
-        while ((bytes = read(fss_out_fd, response, sizeof(response)-1)) > 0) {
+        while ((bytes = read(fss_out_fd, response, sizeof(response) - 1)) > 0) {
             response[bytes] = '\0';
             printf("%s", response);
             fflush(stdout);
-            
             if (strstr(response, "Manager shutdown complete") != NULL) {
                 close(fss_in_fd);
                 close(fss_out_fd);
                 return 0;
-            }
-            
-            // Check if we've received a complete message (ends with newline)
-            if (response[bytes-1] == '\n') {
-                break;
             }
         }
     }

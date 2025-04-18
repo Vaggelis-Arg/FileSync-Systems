@@ -10,40 +10,17 @@
 #include <time.h>
 
 void print_report(const char *status, const char *details, const char *errors,
-	const char *source, const char *target, const char *operation) {
-    int fss_out_fd = open("fss_out", O_WRONLY);
-    if (fss_out_fd == -1) {
-        perror("worker failed to open fss_out");
-        return;
-    }
-    
+    const char *source, const char *target, const char *operation) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     char timestamp[20];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
     
-    char report[1024];
-	snprintf(report, sizeof(report), 
-		"[%s] [WORKER_REPORT] [%s] [%s] [%d] [%s] [%s] [%s]\n",
-		timestamp, source, target,
-		getpid(), operation, status, strcmp(status, "ERROR") ? details : errors);
-
-	ssize_t written = write(fss_out_fd, report, strlen(report));
-	if (written == -1) {
-		perror("Failed to write report to fss_out");
-	}
+    printf("[%s] [WORKER_REPORT] [%s] [%s] [%d] [%s] [%s] [%s]\n",
+        timestamp, source, target,
+        getpid(), operation, status, strcmp(status, "ERROR") ? details : errors);
     
-    close(fss_out_fd);
-    
-    printf("----------------------------------------------------\n");
-    printf("EXEC_REPORT_START\n");
-    printf("STATUS: %s\n", status);
-    printf("DETAILS: %s\n", details);
-    if (errors != NULL && strlen(errors) > 0) {
-        printf("ERRORS:\n%s\n", errors);
-    }
-    printf("EXEC_REPORT_END\n");
-    printf("----------------------------------------------------\n");
+    fflush(stdout);
 }
 
 int sync_file(const char *src, const char *dest) {

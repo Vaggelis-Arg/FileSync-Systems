@@ -20,6 +20,7 @@ typedef struct SyncInfo {
     int active;
     int error_count;
 	pid_t last_worker_pid;
+	int worker_pipe_fd;
     char *last_operation;
     char *last_worker_details;
     struct SyncInfo *next;
@@ -101,35 +102,51 @@ SyncInfo* parse_config(const char *filename) {
 }
 
 void start_worker_with_operation(const char *source, const char *target, 
-	const char *filename, const char *operation) {
+    const char *filename, const char *operation) {
     if (active_workers >= worker_limit) {
-        // Add to queue
+        // Add to queue (same as before)
         WorkerTask *new_task = malloc(sizeof(WorkerTask));
         new_task->source = strdup(source);
         new_task->target = strdup(target);
-		new_task->filename = strdup(filename);
-		new_task->operation = strdup(operation);
+        new_task->filename = strdup(filename);
+        new_task->operation = strdup(operation);
         new_task->next = task_queue;
         task_queue = new_task;
         printf("Worker queue full. Queued operation: %s on %s\n", operation, source);
         return;
     }
 
+    // Create pipe for worker communication
+    int worker_pipe[2];
+    if (pipe(worker_pipe) == -1) {
+        perror("pipe");
+        return;
+    }
+
     pid_t pid = fork();
     if (pid == 0) {
         // Worker process
+        close(worker_pipe[0]); // Close read end
+        
+        // Redirect stdout to pipe
+        dup2(worker_pipe[1], STDOUT_FILENO);
+        close(worker_pipe[1]);
+        
         execl("./worker", "worker", source, target, filename, operation, NULL);
         perror("execl");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
+        close(worker_pipe[1]); // Close write end in parent
+        
         active_workers++;
         printf("Started worker PID: %d for %s (%s)\n", pid, operation, filename);
         
-        // Track worker in SyncInfo
+        // Track worker in SyncInfo and store pipe fd
         SyncInfo *current = config;
         while (current) {
             if (strcmp(current->source, source) == 0) {
                 current->last_worker_pid = pid;
+                current->worker_pipe_fd = worker_pipe[0]; // Store pipe fd
                 if (current->last_operation) free(current->last_operation);
                 current->last_operation = strdup(operation);
                 break;
@@ -138,6 +155,8 @@ void start_worker_with_operation(const char *source, const char *target,
         }
     } else {
         perror("fork");
+        close(worker_pipe[0]);
+        close(worker_pipe[1]);
     }
 }
 
@@ -149,10 +168,16 @@ void sigchld_handler(int sig) {
         printf("Worker %d exited. Active: %d/%d\n", 
               pid, active_workers, worker_limit);
 
-		// Find and update the worker's sync info
+        // Find and update the worker's sync info
         SyncInfo *current = config;
         while (current) {
             if (current->last_worker_pid == pid) {
+                // Close and clean up pipe if still open
+                if (current->worker_pipe_fd > 0) {
+                    close(current->worker_pipe_fd);
+                    current->worker_pipe_fd = -1;
+                }
+                
                 // Update last sync time
                 current->last_sync = time(NULL);
                 
@@ -165,7 +190,7 @@ void sigchld_handler(int sig) {
             current = current->next;
         }
         
-        // Process queued tasks
+        // Process queued tasks (same as before)
         while (task_queue && active_workers < worker_limit) {
             WorkerTask *task = task_queue;
             task_queue = task_queue->next;
@@ -588,9 +613,8 @@ int main(int argc, char *argv[]) {
 
     int fss_in_fd = open("fss_in", O_RDONLY);
     int fss_out_fd = open("fss_out", O_WRONLY);
-    int fss_report_fd = open("fss_out", O_RDONLY | O_NONBLOCK);
 
-    if (fss_in_fd == -1 || fss_out_fd == -1 || fss_report_fd == -1) {
+    if (fss_in_fd == -1 || fss_out_fd == -1) {
         perror("Failed to open pipes");
         exit(EXIT_FAILURE);
     }
@@ -598,20 +622,75 @@ int main(int argc, char *argv[]) {
     fd_set read_fds;
     while (1) {
         FD_ZERO(&read_fds);
-        FD_SET(fss_in_fd, &read_fds);
-        FD_SET(inotify_fd, &read_fds);
-		FD_SET(fss_report_fd, &read_fds);
+		FD_SET(fss_in_fd, &read_fds);
+		FD_SET(inotify_fd, &read_fds);
+		
+		// Add all active worker pipes to the select set
+		int max_fd = fss_in_fd > inotify_fd ? fss_in_fd : inotify_fd;
+		SyncInfo *current = config;
+		while (current) {
+			if (current->worker_pipe_fd > 0) {
+				FD_SET(current->worker_pipe_fd, &read_fds);
+				if (current->worker_pipe_fd > max_fd) {
+					max_fd = current->worker_pipe_fd;
+				}
+			}
+			current = current->next;
+		}
 
-        int max_fd = fss_in_fd > inotify_fd ? fss_in_fd : inotify_fd;
-        if (fss_report_fd > max_fd) max_fd = fss_report_fd;
-
-        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+		if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
 			if (errno == EINTR) {
 				continue;
 			}
-            perror("select");
-            continue;
-        }
+			perror("select");
+			continue;
+		}
+
+		// Check for worker output first
+		current = config;
+		while (current) {
+			if (current->worker_pipe_fd > 0 && FD_ISSET(current->worker_pipe_fd, &read_fds)) {
+				char report[1024];
+				ssize_t bytes = read(current->worker_pipe_fd, report, sizeof(report) - 1);
+				
+				if (bytes > 0) {
+					report[bytes] = '\0';
+					char *worker_tag = strstr(report, "[WORKER_REPORT]");
+					if (worker_tag) {
+						// Parse worker report
+						char timestamp[32], source_dir[256], target_dir[256];
+						int worker_pid;
+						char operation[20], status[20], details[256];
+						
+						if (sscanf(report, "[%31[^]]] [%*[^]]] [%255[^]]] [%255[^]]] [%d] [%19[^]]] [%19[^]]] [%255[^]]]",
+								timestamp, source_dir, target_dir, &worker_pid, 
+								operation, status, details) >= 6) {
+							
+							// Log the result
+							log_sync_result(logfile, source_dir, target_dir, 
+										worker_pid, operation, status, details);
+							
+							// Update sync info with details
+							SyncInfo *info = config;
+							while (info) {
+								if (info->last_worker_pid == worker_pid) {
+									if (info->last_worker_details) 
+										free(info->last_worker_details);
+									info->last_worker_details = strdup(details);
+									break;
+								}
+								info = info->next;
+							}
+						}
+					}
+				} else if (bytes == 0) {
+					// Pipe was closed - worker finished
+					close(current->worker_pipe_fd);
+					current->worker_pipe_fd = -1;
+				}
+			}
+			current = current->next;
+		}
 
         if (FD_ISSET(inotify_fd, &read_fds)) {
             handle_inotify_events();
@@ -633,48 +712,8 @@ int main(int argc, char *argv[]) {
                 fss_in_fd = open("fss_in", O_RDONLY);
                 if (fss_in_fd == -1) {
                     perror("Failed to reopen fss_in");
-                    sleep(1); // Wait before retrying
                 }
             }
         }
-
-		if (FD_ISSET(fss_report_fd, &read_fds)) {
-			char report[1024];
-			ssize_t bytes = read(fss_report_fd, report, sizeof(report) - 1);
-			
-			if (bytes > 0) {
-				report[bytes] = '\0';
-				char *worker_tag = strstr(report, "[WORKER_REPORT]");
-				if (worker_tag) {
-					// Parse worker report
-					char timestamp[32], source_dir[256], target_dir[256];
-					int worker_pid;
-					char operation[20], status[20], details[256];
-					
-					if (sscanf(report, "[%31[^]]] [%*[^]]] [%255[^]]] [%255[^]]] [%d] [%19[^]]] [%19[^]]] [%255[^]]]",
-							timestamp, source_dir, target_dir, &worker_pid, 
-							operation, status, details) >= 6) {
-						
-						// Log the result
-						log_sync_result(logfile, source_dir, target_dir, 
-									  worker_pid, operation, status, details);
-						
-						// Update sync info with details
-						SyncInfo *current = config;
-						while (current) {
-							if (current->last_worker_pid == worker_pid) {
-								if (current->last_worker_details) 
-									free(current->last_worker_details);
-								current->last_worker_details = strdup(details);
-								break;
-							}
-							current = current->next;
-						}
-					} else {
-						fprintf(stderr, "Failed to parse worker report: %s\n", report);
-					}
-				}
-			}
-		}
 	}
 }
