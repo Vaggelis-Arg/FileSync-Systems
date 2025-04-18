@@ -317,8 +317,8 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                     "Monitoring started for %s (wd=%d)", new_node->source, new_node->wd);
             log_message(logfile, log_msg);
 			snprintf(response, sizeof(response),
-                "[%s] Added directory: %s -> %s\n",
-                timestamp, source, target);
+                "[%s] Added directory: %s -> %s\n[%s] Monitoring started for %s (wd=%d)\n",
+                timestamp, source, target, timestamp, new_node->source, new_node->wd);
 			ssize_t written = write(fss_out_fd, response, strlen(response));
 			if (written == -1) {
 				perror("write to fss_out_fd failed");
