@@ -1,6 +1,0 @@
-[2025-04-18 22:27:46] Added directory: /tmp/source2 -> /tmp/target2
-[2025-04-18 22:27:46] Failed to monitor /tmp/source2
-[2025-04-18 22:27:46] Added directory: /tmp/source1 -> /tmp/target1
-[2025-04-18 22:27:46] Failed to monitor /tmp/source1
-[2025-04-18 22:27:58] Added directory: /home/vaggelisarg/FileSync-System/data -> /home/vaggelisarg/FileSync-System/data-temp
-[2025-04-18 22:27:58] Monitoring started for /home/vaggelisarg/FileSync-System/data (wd=1)

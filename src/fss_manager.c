@@ -282,6 +282,27 @@ void log_sync_result(const char *logfile, const char *source, const char *target
 	fclose(fp);
 }
 
+void display_exec_report(const char *source, const char *target, 
+		const char *operation, const char *status, 
+		const char *details, const char *errors) {
+	time_t now = time(NULL);
+	struct tm *t = localtime(&now);
+	char timestamp[20];
+	strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
+
+	printf("----------------------------------------------------\n");
+	printf("EXEC_REPORT_START\n");
+	printf("OPERATION: %s\n", operation);
+	printf("STATUS: %s\n", status);
+	printf("DETAILS: %s\n", details);
+	if (errors != NULL && strlen(errors) > 0) {
+		printf("ERRORS:\n%s\n", errors);
+	}
+	printf("EXEC_REPORT_END\n");
+	printf("----------------------------------------------------\n");
+	fflush(stdout);
+}
+
 void process_command(const char *command, const char *logfile, int fss_in_fd, int fss_out_fd) {
     char cmd[32], source[128], target[128];
     time_t now = time(NULL);
@@ -682,6 +703,13 @@ int main(int argc, char *argv[]) {
 								info = info->next;
 							}
 						}
+						if (strcmp(status, "ERROR") == 0) {
+                            display_exec_report(source_dir, target_dir, operation, 
+                                              status, "", details);
+                        } else {
+                            display_exec_report(source_dir, target_dir, operation, 
+                                              status, details, "");
+                        }
 					}
 				} else if (bytes == 0) {
 					// Pipe was closed - worker finished
