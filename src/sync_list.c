@@ -1,5 +1,6 @@
 /* File: sync_list.c */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include "sync_list.h"

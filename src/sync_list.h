@@ -2,8 +2,8 @@
 #ifndef SYNC_LIST_H
 #define SYNC_LIST_H
 
-#include <stdlib.h>
-#include <unistd.h>
+#include <sys/types.h>
+#include <time.h>
 
 typedef struct SyncInfo {
     char *source;
