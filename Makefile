@@ -8,10 +8,9 @@ OBJ_DIR = build
 CONSOLE_SRC = $(SRC_DIR)/fss_console.c
 MANAGER_SRC = $(SRC_DIR)/fss_manager.c
 WORKER_SRC = $(SRC_DIR)/worker.c
-COMMON_SRC = $(SRC_DIR)/sync_list.c
 
 CONSOLE_OBJ = $(OBJ_DIR)/fss_console.o
-MANAGER_OBJ = $(OBJ_DIR)/fss_manager.o $(OBJ_DIR)/sync_list.o
+MANAGER_OBJ = $(OBJ_DIR)/fss_manager.o
 WORKER_OBJ = $(OBJ_DIR)/worker.o
 
 BINARIES = fss_console fss_manager worker
