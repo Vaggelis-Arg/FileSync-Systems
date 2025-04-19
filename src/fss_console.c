@@ -37,6 +37,9 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+	printf("> ");
+    fflush(stdout);
+
     while (1) {
         fd_set read_fds;
         int retval;
@@ -45,9 +48,6 @@ int main(int argc, char *argv[]) {
         FD_ZERO(&read_fds);
         FD_SET(0, &read_fds);        // stdin
         FD_SET(fss_out_fd, &read_fds);
-
-        printf("> ");
-        fflush(stdout);
 
         retval = select(fss_out_fd + 1, &read_fds, NULL, NULL, NULL);
         
@@ -110,6 +110,9 @@ int main(int argc, char *argv[]) {
                 perror("read from fss_out");
                 break;
             }
+			
+			printf("> ");
+            fflush(stdout);
         }
     }
 

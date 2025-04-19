@@ -3,13 +3,20 @@
 #define SYNC_LIST_H
 
 #include <stdlib.h>
+#include <unistd.h>
 
-typedef struct sync_info {
+typedef struct SyncInfo {
     char *source;
     char *target;
+	int wd;
     time_t last_sync;
     int active;
     int error_count;
+	pid_t last_worker_pid;
+	int worker_pipe_fd;
+    char *last_operation;
+    char *last_worker_details;
+    struct SyncInfo *next;
 } SyncInfo;
 
 typedef struct sync_listnode *SyncList;
