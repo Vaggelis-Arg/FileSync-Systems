@@ -507,6 +507,16 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 			    fsync(fss_out_fd);
                 
                 start_worker_with_operation(source, current->target, "ALL", "FULL");
+
+				snprintf(response, sizeof(response),
+						"[%s] Sync completed %s -> %s Errors:%d\n",
+						timestamp, source, current->target, current->error_count);
+				written = write(fss_out_fd, response, strlen(response));
+				if (written == -1) {
+					perror("write to fss_out_fd failed");
+				}
+				fsync(fss_out_fd);
+
                 return;
             }
             current = current->next;
