@@ -434,6 +434,7 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
     }
     else if (strcmp(cmd, "cancel") == 0) {
 		SyncInfo *current = config;
+		SyncInfo *prev = NULL;
 		int found = 0;
 		
 		while (current) {
@@ -457,6 +458,13 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 							"[%s] Directory not monitored: %s\n", 
 							timestamp, source);
 				}
+
+				if (prev == NULL) {
+					config = current->next;
+				} else {
+					prev->next = current->next;
+				}
+				free(current);
 				
 				ssize_t written = write(fss_out_fd, response, strlen(response));
 				if (written == -1) {
@@ -465,6 +473,7 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 				fsync(fss_out_fd);
 				break;
 			}
+			prev = current;
 			current = current->next;
 		}
 		
@@ -713,6 +722,10 @@ int main(int argc, char *argv[]) {
 					}
 				} else if (bytes == 0) {
 					// Pipe was closed - worker finished
+					close(current->worker_pipe_fd);
+					current->worker_pipe_fd = -1;
+				} else if (bytes == -1) {
+					perror("read from worker pipe");
 					close(current->worker_pipe_fd);
 					current->worker_pipe_fd = -1;
 				}
