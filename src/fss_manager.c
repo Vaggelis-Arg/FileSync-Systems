@@ -103,8 +103,18 @@ SyncInfo* parse_config(const char *filename) {
 
 void start_worker_with_operation(const char *source, const char *target, 
     const char *filename, const char *operation) {
+	// Check for existing worker
+	SyncInfo *current = config;
+	while (current) {
+		if (strcmp(current->source, source) == 0 && 
+			current->last_worker_pid > 0 && 
+			kill(current->last_worker_pid, 0) == 0) {
+			printf("Worker already running for %s\n", source);
+			return;
+		}
+		current = current->next;
+	}
     if (active_workers >= worker_limit) {
-        // Add to queue (same as before)
         WorkerTask *new_task = malloc(sizeof(WorkerTask));
         new_task->source = strdup(source);
         new_task->target = strdup(target);
