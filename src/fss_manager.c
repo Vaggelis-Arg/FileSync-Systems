@@ -16,12 +16,12 @@
 typedef struct SyncInfo {
     char *source;
     char *target;
-	int wd;
+    int wd;
     time_t last_sync;
     int active;
     int error_count;
-	pid_t last_worker_pid;
-	int worker_pipe_fd;
+    pid_t last_worker_pid;
+    int worker_pipe_fd;
     char *last_operation;
     char *last_worker_details;
     struct SyncInfo *next;
@@ -34,7 +34,7 @@ int worker_limit = 5;
 typedef struct WorkerTask {
     char *source;
     char *target;
-	char *filename;
+    char *filename;
     char *operation;
     struct WorkerTask *next;
 } WorkerTask;
@@ -44,6 +44,16 @@ int active_workers = 0;
 
 int inotify_fd;
 static time_t last_event_time[1024] = {0};
+
+char *logfile;
+
+void log_sync_result(const char *logfile, const char *source, const char *target,
+    pid_t worker_pid, const char *operation, const char *result,
+    const char *details);
+
+void display_exec_report(const char *source, const char *target, 
+    const char *operation, const char *status, 
+    const char *details, const char *errors);
 
 void create_named_pipes() {
     // Remove existing pipes
@@ -161,37 +171,86 @@ void start_worker_with_operation(const char *source, const char *target,
     }
 }
 
+void process_worker_report(const char *report, pid_t worker_pid) {
+    char *worker_tag = strstr(report, "[WORKER_REPORT]");
+    if (worker_tag) {
+        char timestamp[32], source_dir[256], target_dir[256];
+        char operation[20], status[20], details[256];
+        
+        if (sscanf(report, "[%31[^]]] [%*[^]]] [%255[^]]] [%255[^]]] [%*d] [%19[^]]] [%19[^]]] [%255[^]]]",
+                timestamp, source_dir, target_dir, operation, status, details) >= 5) {
+            
+            // Log the result
+            log_sync_result(logfile, source_dir, target_dir, 
+                      worker_pid, operation, status, details);
+            
+            // Update sync info with details
+            SyncInfo *info = config;
+            while (info) {
+                if (info->last_worker_pid == worker_pid) {
+                    if (info->last_worker_details) 
+                        free(info->last_worker_details);
+                    info->last_worker_details = strdup(details);
+                    break;
+                }
+                info = info->next;
+            }
+            
+            // Display report (this is now synchronized with process exit)
+            if (strcmp(status, "ERROR") == 0) {
+                display_exec_report(source_dir, target_dir, operation, 
+                              status, "", details);
+            } else {
+                display_exec_report(source_dir, target_dir, operation, 
+                              status, details, "");
+            }
+        }
+    }
+}
+
 void sigchld_handler(int sig) {
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        active_workers--;
-        printf("Worker %d exited. Active: %d/%d\n", 
-              pid, active_workers, worker_limit);
-
-        // Find and update the worker's sync info
+        // First, find and process any remaining output from this worker
         SyncInfo *current = config;
         while (current) {
             if (current->last_worker_pid == pid) {
-                // Close and clean up pipe if still open
                 if (current->worker_pipe_fd > 0) {
+                    // Read any remaining data from the pipe
+                    char report[1024];
+                    ssize_t bytes;
+                    while ((bytes = read(current->worker_pipe_fd, report, sizeof(report) - 1)) > 0) {
+                        report[bytes] = '\0';
+                        process_worker_report(report, pid);
+                    }
                     close(current->worker_pipe_fd);
                     current->worker_pipe_fd = -1;
-                }
-                
-                // Update last sync time
-                current->last_sync = time(NULL);
-                
-                // Update error count if worker failed
-                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                    current->error_count++;
                 }
                 break;
             }
             current = current->next;
         }
+
+        // Now handle the process exit
+        active_workers--;
+        printf("Worker %d exited. Active: %d/%d\n", pid, active_workers, worker_limit);
+
+        // Update sync info
+        current = config;
+        while (current) {
+            if (current->last_worker_pid == pid) {
+                current->last_sync = time(NULL);
+                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                    current->error_count++;
+                }
+                current->last_worker_pid = -1;  // Mark as no longer active
+                break;
+            }
+            current = current->next;
+        }
         
-        // Process queued tasks (same as before)
+        // Process queued tasks
         while (task_queue && active_workers < worker_limit) {
             WorkerTask *task = task_queue;
             task_queue = task_queue->next;
@@ -313,41 +372,41 @@ void log_message(const char *logfile, const char *message) {
 }
 
 void log_sync_result(const char *logfile, const char *source, const char *target,
-	pid_t worker_pid, const char *operation, const char *result,
-	const char *details) {
-	FILE *fp = fopen(logfile, "a");
-	if (!fp) return;
+    pid_t worker_pid, const char *operation, const char *result,
+    const char *details) {
+    FILE *fp = fopen(logfile, "a");
+    if (!fp) return;
 
-	time_t now = time(NULL);
-	struct tm *t = localtime(&now);
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
 
-	fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%s] [%s] [%d] [%s] [%s] [%s]\n",
-	t->tm_year+1900, t->tm_mon+1, t->tm_mday,
-	t->tm_hour, t->tm_min, t->tm_sec,
-	source, target, worker_pid, operation, result, details);
+    fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%s] [%s] [%d] [%s] [%s] [%s]\n",
+    t->tm_year+1900, t->tm_mon+1, t->tm_mday,
+    t->tm_hour, t->tm_min, t->tm_sec,
+    source, target, worker_pid, operation, result, details);
 
-	fclose(fp);
+    fclose(fp);
 }
 
 void display_exec_report(const char *source, const char *target, 
-		const char *operation, const char *status, 
-		const char *details, const char *errors) {
-	time_t now = time(NULL);
-	struct tm *t = localtime(&now);
-	char timestamp[20];
-	strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
+        const char *operation, const char *status, 
+        const char *details, const char *errors) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char timestamp[20];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
 
-	printf("----------------------------------------------------\n");
-	printf("EXEC_REPORT_START\n");
-	printf("OPERATION: %s\n", operation);
-	printf("STATUS: %s\n", status);
-	printf("DETAILS: %s\n", details);
-	if (errors != NULL && strlen(errors) > 0) {
-		printf("ERRORS:\n%s\n", errors);
-	}
-	printf("EXEC_REPORT_END\n");
-	printf("----------------------------------------------------\n");
-	fflush(stdout);
+    printf("----------------------------------------------------\n");
+    printf("EXEC_REPORT_START\n");
+    printf("OPERATION: %s\n", operation);
+    printf("STATUS: %s\n", status);
+    printf("DETAILS: %s\n", details);
+    if (errors != NULL && strlen(errors) > 0) {
+        printf("ERRORS:\n%s\n", errors);
+    }
+    printf("EXEC_REPORT_END\n");
+    printf("----------------------------------------------------\n");
+    fflush(stdout);
 }
 
 void process_command(const char *command, const char *logfile, int fss_in_fd, int fss_out_fd) {
@@ -365,10 +424,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         // Handle invalid command format
         snprintf(response, sizeof(response), 
                 "[%s] Invalid command format\n", timestamp);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1) {
-			perror("write to fss_out_fd failed");
-		}
+        ssize_t written = write(fss_out_fd, response, strlen(response));
+        if (written == -1) {
+            perror("write to fss_out_fd failed");
+        }
         return;
     }
 
@@ -379,10 +438,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
             if (strcmp(current->source, source) == 0) {
                 snprintf(response, sizeof(response),
                         "[%s] Already in queue: %s\n", timestamp, source);
-				ssize_t written = write(fss_out_fd, response, strlen(response));
-				if (written == -1) {
-					perror("write to fss_out_fd failed");
-				}
+                ssize_t written = write(fss_out_fd, response, strlen(response));
+                if (written == -1) {
+                    perror("write to fss_out_fd failed");
+                }
                 return;
             }
             current = current->next;
@@ -411,22 +470,22 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
             
             snprintf(response, sizeof(response),
                     "[%s] Failed to monitor %s\n", timestamp, new_node->source);
-			ssize_t written = write(fss_out_fd, response, strlen(response));
-			if (written == -1) {
-				perror("write to fss_out_fd failed");
-			}
+            ssize_t written = write(fss_out_fd, response, strlen(response));
+            if (written == -1) {
+                perror("write to fss_out_fd failed");
+            }
         } else {
             snprintf(log_msg, sizeof(log_msg), 
                     "Monitoring started for %s (wd=%d)", new_node->source, new_node->wd);
             log_message(logfile, log_msg);
-			snprintf(response, sizeof(response),
+            snprintf(response, sizeof(response),
                 "[%s] Added directory: %s -> %s\n[%s] Monitoring started for %s (wd=%d)\n",
                 timestamp, source, target, timestamp, new_node->source, new_node->wd);
-			ssize_t written = write(fss_out_fd, response, strlen(response));
-			if (written == -1) {
-				perror("write to fss_out_fd failed");
-			}
-    		fsync(fss_out_fd);
+            ssize_t written = write(fss_out_fd, response, strlen(response));
+            if (written == -1) {
+                perror("write to fss_out_fd failed");
+            }
+            fsync(fss_out_fd);
         }
         
         start_worker_with_operation(source, target, "ALL", "FULL");
@@ -459,11 +518,11 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                         last_sync_time,
                         current->error_count,
                         current->active ? "Active" : "Inactive");
-				ssize_t written = write(fss_out_fd, response, strlen(response));
-				if (written == -1) {
-					perror("write to fss_out_fd failed");
-				}
-    			fsync(fss_out_fd);
+                ssize_t written = write(fss_out_fd, response, strlen(response));
+                if (written == -1) {
+                    perror("write to fss_out_fd failed");
+                }
+                fsync(fss_out_fd);
                 break;
             }
             current = current->next;
@@ -472,70 +531,70 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         if (!found) {
             snprintf(response, sizeof(response), 
                     "[%s] Directory not monitored: %s\n", timestamp, source);
-			ssize_t written = write(fss_out_fd, response, strlen(response));
-			if (written == -1) {
-				perror("write to fss_out_fd failed");
-			}
-		    fsync(fss_out_fd);
+            ssize_t written = write(fss_out_fd, response, strlen(response));
+            if (written == -1) {
+                perror("write to fss_out_fd failed");
+            }
+            fsync(fss_out_fd);
         }
     }
     else if (strcmp(cmd, "cancel") == 0) {
-		SyncInfo *current = config;
-		SyncInfo *prev = NULL;
-		int found = 0;
-		
-		while (current) {
-			if (strcmp(current->source, source) == 0) {
-				found = 1;
-				if (current->active) {
-					current->active = 0;
-					inotify_rm_watch(inotify_fd, current->wd);
-					
-					// Log to both console and log file
-					snprintf(log_msg, sizeof(log_msg), 
-							"Monitoring stopped for %s", source);
-					log_message(logfile, log_msg);
-					
-					snprintf(response, sizeof(response),
-							"[%s] Monitoring stopped for %s\n", 
-							timestamp, source);
-				} else {
-					// Directory exists but already inactive - console only
-					snprintf(response, sizeof(response),
-							"[%s] Directory not monitored: %s\n", 
-							timestamp, source);
-				}
+        SyncInfo *current = config;
+        SyncInfo *prev = NULL;
+        int found = 0;
+        
+        while (current) {
+            if (strcmp(current->source, source) == 0) {
+                found = 1;
+                if (current->active) {
+                    current->active = 0;
+                    inotify_rm_watch(inotify_fd, current->wd);
+                    
+                    // Log to both console and log file
+                    snprintf(log_msg, sizeof(log_msg), 
+                            "Monitoring stopped for %s", source);
+                    log_message(logfile, log_msg);
+                    
+                    snprintf(response, sizeof(response),
+                            "[%s] Monitoring stopped for %s\n", 
+                            timestamp, source);
+                } else {
+                    // Directory exists but already inactive - console only
+                    snprintf(response, sizeof(response),
+                            "[%s] Directory not monitored: %s\n", 
+                            timestamp, source);
+                }
 
-				if (prev == NULL) {
-					config = current->next;
-				} else {
-					prev->next = current->next;
-				}
-				free(current);
-				
-				ssize_t written = write(fss_out_fd, response, strlen(response));
-				if (written == -1) {
-					perror("write to fss_out_fd failed");
-				}
-				fsync(fss_out_fd);
-				break;
-			}
-			prev = current;
-			current = current->next;
-		}
-		
-		if (!found) {
-			// Directory not found - console only
-			snprintf(response, sizeof(response),
-					"[%s] Directory not monitored: %s\n", 
-					timestamp, source);
-			ssize_t written = write(fss_out_fd, response, strlen(response));
-			if (written == -1) {
-				perror("write to fss_out_fd failed");
-			}
-			fsync(fss_out_fd);
-		}
-	}
+                if (prev == NULL) {
+                    config = current->next;
+                } else {
+                    prev->next = current->next;
+                }
+                free(current);
+                
+                ssize_t written = write(fss_out_fd, response, strlen(response));
+                if (written == -1) {
+                    perror("write to fss_out_fd failed");
+                }
+                fsync(fss_out_fd);
+                break;
+            }
+            prev = current;
+            current = current->next;
+        }
+        
+        if (!found) {
+            // Directory not found - console only
+            snprintf(response, sizeof(response),
+                    "[%s] Directory not monitored: %s\n", 
+                    timestamp, source);
+            ssize_t written = write(fss_out_fd, response, strlen(response));
+            if (written == -1) {
+                perror("write to fss_out_fd failed");
+            }
+            fsync(fss_out_fd);
+        }
+    }
     else if (strcmp(cmd, "sync") == 0) {
         SyncInfo *current = config;
         while (current) {
@@ -547,22 +606,22 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                 snprintf(response, sizeof(response),
                         "[%s] Syncing directory: %s -> %s\n", 
                         timestamp, source, current->target);
-				ssize_t written = write(fss_out_fd, response, strlen(response));
-				if (written == -1) {
-					perror("write to fss_out_fd failed");
-				}
-			    fsync(fss_out_fd);
+                ssize_t written = write(fss_out_fd, response, strlen(response));
+                if (written == -1) {
+                    perror("write to fss_out_fd failed");
+                }
+                fsync(fss_out_fd);
                 
                 start_worker_with_operation(source, current->target, "ALL", "FULL");
 
-				snprintf(response, sizeof(response),
-						"[%s] Sync completed %s -> %s Errors:%d\n",
-						timestamp, source, current->target, current->error_count);
-				written = write(fss_out_fd, response, strlen(response));
-				if (written == -1) {
-					perror("write to fss_out_fd failed");
-				}
-				fsync(fss_out_fd);
+                snprintf(response, sizeof(response),
+                        "[%s] Sync completed %s -> %s Errors:%d\n",
+                        timestamp, source, current->target, current->error_count);
+                written = write(fss_out_fd, response, strlen(response));
+                if (written == -1) {
+                    perror("write to fss_out_fd failed");
+                }
+                fsync(fss_out_fd);
 
                 return;
             }
@@ -571,11 +630,11 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
         
         snprintf(response, sizeof(response),
                 "[%s] Directory not monitored: %s\n", timestamp, source);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1) {
-			perror("write to fss_out_fd failed");
-		}
-		fsync(fss_out_fd);
+        ssize_t written = write(fss_out_fd, response, strlen(response));
+        if (written == -1) {
+            perror("write to fss_out_fd failed");
+        }
+        fsync(fss_out_fd);
     }
     else if (strcmp(cmd, "shutdown") == 0) {
         snprintf(log_msg, sizeof(log_msg), "Shutting down manager");
@@ -587,11 +646,11 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
                 "[%s] Processing remaining tasks...\n"
                 "[%s] Manager shutdown complete\n",
                 timestamp, timestamp, timestamp, timestamp);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1) {
-			perror("write to fss_out_fd failed");
-		}
-		fsync(fss_out_fd);
+        ssize_t written = write(fss_out_fd, response, strlen(response));
+        if (written == -1) {
+            perror("write to fss_out_fd failed");
+        }
+        fsync(fss_out_fd);
         
         // Wait for active workers
         while (active_workers > 0) {
@@ -616,23 +675,23 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
     else {
         snprintf(response, sizeof(response),
                 "[%s] Unknown command: %s\n", timestamp, cmd);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1) {
-			perror("write to fss_out_fd failed");
-		}
-		fsync(fss_out_fd);
+        ssize_t written = write(fss_out_fd, response, strlen(response));
+        if (written == -1) {
+            perror("write to fss_out_fd failed");
+        }
+        fsync(fss_out_fd);
     }
 }
 
 int main(int argc, char *argv[]) {
-    char *logfile = "manager.log";
+    logfile = "manager.log";
     char *config_file = NULL;
     int i = 1;  // Start from first argument after program name
 
-	if(argc < 5) {
-		fprintf(stderr, "Usage: %s -l <logfile> -c <config> [-n <workers>]\n", argv[0]);
+    if(argc < 5) {
+        fprintf(stderr, "Usage: %s -l <logfile> -c <config> [-n <workers>]\n", argv[0]);
         exit(EXIT_FAILURE);
-	}
+    }
 
     while (i < argc) {
         if (strcmp(argv[i], "-l") == 0) {
@@ -664,7 +723,7 @@ int main(int argc, char *argv[]) {
     }
 
     create_named_pipes();
-	clean_logs(logfile);
+    clean_logs(logfile);
     config = parse_config(config_file);
     setup_inotify();
     signal(SIGCHLD, sigchld_handler);
@@ -677,24 +736,24 @@ int main(int argc, char *argv[]) {
                 current->source, current->target);
         log_message(logfile, log_buffer);
 
-		current->wd = inotify_add_watch(inotify_fd, current->source,
-			IN_CREATE | IN_MODIFY | IN_DELETE);
-		if (current->wd == -1) {
-			printf("Failed to monitor %s\n", current->source);
-			snprintf(log_buffer, sizeof(log_buffer), "Failed to monitor %s", current->source);
-        	log_message(logfile, log_buffer);
-		} else {
-			printf("Monitoring started for %s (wd=%d)\n", current->source, current->wd);
-			snprintf(log_buffer, sizeof(log_buffer), "Monitoring started for %s (wd=%d)", current->source, current->wd);
-        	log_message(logfile, log_buffer);
-		}
+        current->wd = inotify_add_watch(inotify_fd, current->source,
+            IN_CREATE | IN_MODIFY | IN_DELETE);
+        if (current->wd == -1) {
+            printf("Failed to monitor %s\n", current->source);
+            snprintf(log_buffer, sizeof(log_buffer), "Failed to monitor %s", current->source);
+            log_message(logfile, log_buffer);
+        } else {
+            printf("Monitoring started for %s (wd=%d)\n", current->source, current->wd);
+            snprintf(log_buffer, sizeof(log_buffer), "Monitoring started for %s (wd=%d)", current->source, current->wd);
+            log_message(logfile, log_buffer);
+        }
         
         start_worker_with_operation(
-			current->source,
-			current->target,
-			"ALL",
-			"FULL"
-		);
+            current->source,
+            current->target,
+            "ALL",
+            "FULL"
+        );
         current = current->next;
     }
 
@@ -709,86 +768,48 @@ int main(int argc, char *argv[]) {
     fd_set read_fds;
     while (1) {
         FD_ZERO(&read_fds);
-		FD_SET(fss_in_fd, &read_fds);
-		FD_SET(inotify_fd, &read_fds);
-		
-		// Add all active worker pipes to the select set
-		int max_fd = fss_in_fd > inotify_fd ? fss_in_fd : inotify_fd;
-		SyncInfo *current = config;
-		while (current) {
-			if (current->worker_pipe_fd > 0) {
-				FD_SET(current->worker_pipe_fd, &read_fds);
-				if (current->worker_pipe_fd > max_fd) {
-					max_fd = current->worker_pipe_fd;
-				}
-			}
-			current = current->next;
-		}
+        FD_SET(fss_in_fd, &read_fds);
+        FD_SET(inotify_fd, &read_fds);
+        
+        // Add all active worker pipes to the select set
+        int max_fd = fss_in_fd > inotify_fd ? fss_in_fd : inotify_fd;
+        current = config;
+        while (current) {
+            if (current->worker_pipe_fd > 0) {
+                FD_SET(current->worker_pipe_fd, &read_fds);
+                if (current->worker_pipe_fd > max_fd) {
+                    max_fd = current->worker_pipe_fd;
+                }
+            }
+            current = current->next;
+        }
 
-		if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
-			if (errno == EINTR) {
-				continue;
-			}
-			perror("select");
-			continue;
-		}
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("select");
+            continue;
+        }
 
-		// Check for worker output first
-		current = config;
-		while (current) {
-			if (current->worker_pipe_fd > 0 && FD_ISSET(current->worker_pipe_fd, &read_fds)) {
-				char report[1024];
-				ssize_t bytes = read(current->worker_pipe_fd, report, sizeof(report) - 1);
-				
-				if (bytes > 0) {
-					report[bytes] = '\0';
-					char *worker_tag = strstr(report, "[WORKER_REPORT]");
-					if (worker_tag) {
-						// Parse worker report
-						char timestamp[32], source_dir[256], target_dir[256];
-						int worker_pid;
-						char operation[20], status[20], details[256];
-						
-						if (sscanf(report, "[%31[^]]] [%*[^]]] [%255[^]]] [%255[^]]] [%d] [%19[^]]] [%19[^]]] [%255[^]]]",
-								timestamp, source_dir, target_dir, &worker_pid, 
-								operation, status, details) >= 6) {
-							
-							// Log the result
-							log_sync_result(logfile, source_dir, target_dir, 
-										worker_pid, operation, status, details);
-							
-							// Update sync info with details
-							SyncInfo *info = config;
-							while (info) {
-								if (info->last_worker_pid == worker_pid) {
-									if (info->last_worker_details) 
-										free(info->last_worker_details);
-									info->last_worker_details = strdup(details);
-									break;
-								}
-								info = info->next;
-							}
-						}
-						if (strcmp(status, "ERROR") == 0) {
-                            display_exec_report(source_dir, target_dir, operation, 
-                                              status, "", details);
-                        } else {
-                            display_exec_report(source_dir, target_dir, operation, 
-                                              status, details, "");
-                        }
-					}
-				} else if (bytes == 0) {
-					// Pipe was closed - worker finished
-					close(current->worker_pipe_fd);
-					current->worker_pipe_fd = -1;
-				} else if (bytes == -1) {
-					perror("read from worker pipe");
-					close(current->worker_pipe_fd);
-					current->worker_pipe_fd = -1;
-				}
-			}
-			current = current->next;
-		}
+        // Check for worker output first
+        current = config;
+        while (current) {
+            if (current->worker_pipe_fd > 0 && FD_ISSET(current->worker_pipe_fd, &read_fds)) {
+                char report[1024];
+                ssize_t bytes = read(current->worker_pipe_fd, report, sizeof(report) - 1);
+                
+                if (bytes > 0) {
+                    report[bytes] = '\0';
+                    process_worker_report(report, current->last_worker_pid);
+                } else if (bytes == 0 || bytes == -1) {
+                    // Pipe closed or error - let SIGCHLD handle cleanup
+                    close(current->worker_pipe_fd);
+                    current->worker_pipe_fd = -1;
+                }
+            }
+            current = current->next;
+        }
 
         if (FD_ISSET(inotify_fd, &read_fds)) {
             handle_inotify_events();
@@ -813,5 +834,5 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-	}
+    }
 }
