@@ -11,6 +11,7 @@
 #include <time.h>
 #include <sys/select.h>
 #include <errno.h>
+#include <sys/time.h>
 
 typedef struct SyncInfo {
     char *source;
@@ -42,6 +43,7 @@ WorkerTask *task_queue = NULL;
 int active_workers = 0;
 
 int inotify_fd;
+static time_t last_event_time[1024] = {0};
 
 void create_named_pipes() {
     // Remove existing pipes
@@ -103,17 +105,6 @@ SyncInfo* parse_config(const char *filename) {
 
 void start_worker_with_operation(const char *source, const char *target, 
     const char *filename, const char *operation) {
-	// Check for existing worker
-	SyncInfo *current = config;
-	while (current) {
-		if (strcmp(current->source, source) == 0 && 
-			current->last_worker_pid > 0 && 
-			kill(current->last_worker_pid, 0) == 0) {
-			printf("Worker already running for %s\n", source);
-			return;
-		}
-		current = current->next;
-	}
     if (active_workers >= worker_limit) {
         WorkerTask *new_task = malloc(sizeof(WorkerTask));
         new_task->source = strdup(source);
@@ -244,6 +235,20 @@ void handle_inotify_events() {
     char buffer[4096];
     ssize_t len = read(inotify_fd, buffer, sizeof(buffer));
     
+    // Get current time
+    time_t now = time(NULL);
+    
+    // Structure to track events we'll process
+    typedef struct {
+        char *filename;
+        char operation[10];
+        SyncInfo *info;
+    } EventEntry;
+    
+    EventEntry *events = NULL;
+    size_t num_events = 0;
+
+    // First pass: collect all events
     for (char *ptr = buffer; ptr < buffer + len; ) {
         struct inotify_event *event = (struct inotify_event *)ptr;
         SyncInfo *info = find_sync_info_by_wd(event->wd);
@@ -255,12 +260,44 @@ void handle_inotify_events() {
             if (event->mask & IN_CREATE) strcpy(operation, "ADDED");
             else if (event->mask & IN_MODIFY) strcpy(operation, "MODIFIED");
             else if (event->mask & IN_DELETE) strcpy(operation, "DELETED");
+            else {
+                ptr += sizeof(struct inotify_event) + event->len;
+                continue;
+            }
             
-            // Start worker with specific operation
-            start_worker_with_operation(info->source, info->target, filename, operation);
+            // Simple hash of filename for our time tracking
+            unsigned int hash = 0;
+            for (char *p = filename; *p; p++) {
+                hash = 31 * hash + *p;
+            }
+            hash %= 1024;
+            
+            // Only process if we haven't seen this file recently (within 1 second)
+            if (now - last_event_time[hash] > 0) {
+                last_event_time[hash] = now;
+                
+                // Add to our events to process
+                events = realloc(events, (num_events + 1) * sizeof(EventEntry));
+                events[num_events].filename = strdup(filename);
+                strcpy(events[num_events].operation, operation);
+                events[num_events].info = info;
+                num_events++;
+            }
         }
         ptr += sizeof(struct inotify_event) + event->len;
     }
+
+    // Second pass: process unique events
+    for (size_t i = 0; i < num_events; i++) {
+        start_worker_with_operation(
+            events[i].info->source,
+            events[i].info->target,
+            events[i].filename,
+            events[i].operation
+        );
+        free(events[i].filename);
+    }
+    free(events);
 }
 
 void log_message(const char *logfile, const char *message) {
