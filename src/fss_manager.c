@@ -517,7 +517,6 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 		// Keep track of the current and the previous item of the sync list
 		// so as to be able to delete the source if we find it
 		SyncInfo *curr = sync_info_mem_store;
-		SyncInfo *prev = NULL;
 		int found = 0;
 
 		while (curr) {
@@ -539,16 +538,6 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 					snprintf(response, sizeof(response), "[%s] Directory not monitored: %s\n", timestamp, source);
 				}
 
-				if (prev == NULL) {
-					// If previous is still NULL it means that source is the first item in the sync list
-					sync_info_mem_store = curr->next;
-				}
-				else {
-					// prev != NULL ---> source is in the middle or end of the sync list
-					prev->next = curr->next;
-				}
-				free(curr);
-
 				ssize_t written = write(fss_out_fd, response, strlen(response));
 				if (written == -1) {
 					perror("write to fss_out_fd failed");
@@ -556,7 +545,6 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 				fsync(fss_out_fd);
 				break;
 			}
-			prev = curr;
 			curr = curr->next;
 		}
 
@@ -575,28 +563,37 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 	else if (strcmp(cmd, "sync") == 0)
 	{
 		SyncInfo *curr = sync_info_mem_store;
+		int found = 0;
 		while (curr) {
 			if (strcmp(curr->source, source) == 0) {
-				if(!curr->active)
-					// If source is not monitored we do not sync
-					break;
+				found = 1;
+
+				// Check if there's an active worker for this directory
+				if (curr->active) {
+					snprintf(response, sizeof(response), "[%s] Sync already in progress: %s\n", timestamp, source);
+					ssize_t written = write(fss_out_fd, response, strlen(response));
+					if (written == -1) {
+						perror("write to fss_out_fd failed");
+					}
+					fsync(fss_out_fd);
+					return;
+				}
 
 				snprintf(log_msg, sizeof(log_msg), "Syncing directory: %s -> %s", source, curr->target);
 				log_message(logfile, log_msg);
 
-				snprintf(response, sizeof(response), "[%s] Syncing directory: %s -> %s\n", timestamp, source, curr->target);
-				ssize_t written = write(fss_out_fd, response, strlen(response));
-				if (written == -1) {
-					perror("write to fss_out_fd failed");
-				}
-				fsync(fss_out_fd);
+				int written = snprintf(response, sizeof(response), "[%s] Syncing directory: %s -> %s\n", timestamp, source, curr->target);
+
+				// Add to inotify watch
+				curr->wd = inotify_add_watch(inotify_fd, curr->source,
+					IN_CREATE | IN_MODIFY | IN_DELETE);
 
 				start_worker_with_operation(source, curr->target, "ALL", "FULL");
 
-				snprintf(response, sizeof(response), "[%s] Sync completed %s -> %s Errors:%d\n",
-						 timestamp, source, curr->target, curr->error_count);
-				written = write(fss_out_fd, response, strlen(response));
-				if (written == -1){
+				written += snprintf(response + written, sizeof(response) - written, "[%s] Sync completed %s -> %s Errors:%d\n",
+									timestamp, source, curr->target, curr->error_count);
+				ssize_t written_in_fss_out = write(fss_out_fd, response, strlen(response));
+				if (written_in_fss_out == -1){
 					perror("write to fss_out_fd failed");
 				}
 				fsync(fss_out_fd);
@@ -606,13 +603,14 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 			curr = curr->next;
 		}
 
-		snprintf(response, sizeof(response), "[%s] Directory not monitored: %s\n", timestamp, source);
-		ssize_t written = write(fss_out_fd, response, strlen(response));
-		if (written == -1)
-		{
-			perror("write to fss_out_fd failed");
+		if (!found) {
+			snprintf(response, sizeof(response), "[%s] Directory not monitored: %s\n", timestamp, source);
+			ssize_t written = write(fss_out_fd, response, strlen(response));
+			if (written == -1) {
+				perror("write to fss_out_fd failed");
+			}
+			fsync(fss_out_fd);
 		}
-		fsync(fss_out_fd);
 	}
 
 	else if (strcmp(cmd, "shutdown") == 0)
