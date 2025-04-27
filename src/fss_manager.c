@@ -454,11 +454,14 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 		SyncInfo *new_node = malloc(sizeof(*new_node));
 		new_node->source = strdup(source);
 		new_node->target = strdup(target);
+		new_node->wd = -1;
 		new_node->active = 1;
-		new_node->error_count = 0;
 		new_node->last_sync = time(NULL);
+		new_node->last_worker_pid = -1;
+		new_node->error_count = 0;
+		new_node->worker_pipe_fd = -1;
+		new_node->last_operation = NULL;
 		new_node->next = sync_info_mem_store;
-
 		sync_info_mem_store = new_node;
 
 		// Print verification message
