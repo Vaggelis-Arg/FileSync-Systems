@@ -26,8 +26,23 @@ void print_report(const char *status, const char *details, const char *errors,
     fflush(stdout);
 }
 
-// Function to copy src file to dest file
+// Function to copy src file to dest file. Returns -1 for error, 0 for copy, 1 for skip
 int sync_file(const char *src, const char *dest) {
+	struct stat src_stat, dest_stat;
+
+	// Get source file stats
+	if (stat(src, &src_stat)) {
+        return -1;
+    }
+
+	// Check if destination file exists and compare stats
+    if (!stat(dest, &dest_stat)) {
+        // If src and dest files have same size and modification time, they are identical
+        if (src_stat.st_size == dest_stat.st_size && 
+            src_stat.st_mtime <= dest_stat.st_mtime) {
+            return 1;
+        }
+    }
 
     char path[50];
     snprintf(path, sizeof(path), "%s", dest);
@@ -76,7 +91,7 @@ int main(int argc, char *argv[]) {
     char *filename = argv[3];
     char *operation = argv[4];
 
-    int success_count = 0, error_count = 0;
+    int success_count = 0, error_count = 0, skip_count = 0;
     char details[1000] = {0}, error_buffer[1000] = {0};
 
     if (strcmp(operation, "FULL") == 0) {
@@ -97,28 +112,34 @@ int main(int argc, char *argv[]) {
             snprintf(src_path, sizeof(src_path), "%s/%s", source, entry->d_name);
             snprintf(dest_path, sizeof(dest_path), "%s/%s", target, entry->d_name);
             
-            if (sync_file(src_path, dest_path) == 0) {
+            int result = sync_file(src_path, dest_path);
+            if (result == 0) {
+				// File copied
                 success_count++;
-            } else{
+            } else if (result == 1) {
+				// File skipped
+                skip_count++;
+            } else {
                 error_count++;
                 char error_msg[300];
-                snprintf(error_msg, sizeof(error_msg), "- File %s: %s", entry->d_name, strerror(errno));
+                snprintf(error_msg, sizeof(error_msg), "File %s: %s", entry->d_name, strerror(errno));
                 strncat(error_buffer, error_msg, sizeof(error_buffer) - strlen(error_buffer) - 1);
             }
         }
         closedir(dir);
         
 		// Generate corresponding report
-        if (error_count == 0) {
-            snprintf(details, sizeof(details), "%d files copied", success_count);
-            print_report("SUCCESS", details, NULL, source, target, operation);
-        } else if (success_count > 0) {
-            snprintf(details, sizeof(details), "%d files copied, %d skipped", success_count, error_count);
-            print_report("PARTIAL", details, error_buffer, source, target, operation);
-        } else {
-            snprintf(details, sizeof(details), "0 files copied, %d skipped", error_count);
-            print_report("ERROR", details, error_buffer, source, target, operation);
-        }
+        if (error_count == 0 && skip_count == 0) {
+			snprintf(details, sizeof(details), "%d files copied", success_count);
+			print_report("SUCCESS", details, NULL, source, target, operation);
+		} 
+		else if (error_count == 0) {
+			snprintf(details, sizeof(details), "%d files copied, %d skipped", success_count, skip_count);
+			print_report("PARTIAL", details, NULL, source, target, operation);
+		}
+		else {
+			print_report("ERROR", NULL, error_buffer, source, target, operation);
+		}		
     }
     else {
 		// Single file operations: ADDED, MODIFIED, or DELETED

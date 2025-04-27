@@ -43,7 +43,6 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         fd_set read_fds;
-        int retval;
 
         // Watch stdin and fss_out_fd for input
         FD_ZERO(&read_fds);
