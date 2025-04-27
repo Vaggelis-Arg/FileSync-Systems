@@ -28,7 +28,7 @@ void print_report(const char *status, const char *details, const char *errors,
 
 // Function to copy src file to dest file. Returns -1 for error, 0 for copy, 1 for skip
 int sync_file(const char *src, const char *dest) {
-	struct stat src_stat, dest_stat;
+	struct stat src_stat = {0}, dest_stat = {0};
 
 	// Get source file stats
 	if (stat(src, &src_stat)) {

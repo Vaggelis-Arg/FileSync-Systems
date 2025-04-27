@@ -108,10 +108,17 @@ void parse_config(const char *filename) {
 		}
 
 		SyncInfo *new_node = malloc(sizeof(*new_node));
-		new_node->source = strdup(source);
-		new_node->target = strdup(target);
-		new_node->next = sync_info_mem_store;
-		sync_info_mem_store = new_node;
+        new_node->source = strdup(source);
+        new_node->target = strdup(target);
+        new_node->wd = -1;
+        new_node->active = 1;
+        new_node->last_sync = 0;
+        new_node->last_worker_pid = -1;
+        new_node->error_count = 0;
+        new_node->worker_pipe_fd = -1;
+        new_node->last_operation = NULL;
+        new_node->next = sync_info_mem_store;
+        sync_info_mem_store = new_node;
 	}
 	fclose(fp);
 }
@@ -380,6 +387,29 @@ void display_exec_report(const char *source, const char *target, const char *ope
 	printf("----------------------------------------------------\n");
 	fflush(stdout);
 }
+
+// Function to free a sync info node
+void free_sync_info(SyncInfo *node) {
+    if (node) {
+        free(node->source);
+        free(node->target);
+        if (node->last_operation) {
+            free(node->last_operation);
+        }
+        free(node);
+    }
+}
+
+// Function to free the entire sync info list
+void free_sync_info_list(SyncInfo *head) {
+    SyncInfo *curr = head;
+    while (curr) {
+        SyncInfo *next = curr->next;
+        free_sync_info(curr);
+        curr = next;
+    }
+}
+
 
 // Function to process a command given from the fss_console
 void process_command(const char *command, const char *logfile, int fss_in_fd, int fss_out_fd) {
@@ -650,6 +680,8 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 			free(task->operation);
 			free(task);
 		}
+
+		free_sync_info_list(sync_info_mem_store);
 
 		exit(EXIT_SUCCESS);
 	}
