@@ -148,7 +148,7 @@ int main(int argc, char *argv[]) {
         snprintf(dest_path, sizeof(dest_path), "%s/%s", target, filename);
 
         if (!strcmp(operation, "ADDED") || !strcmp(operation, "MODIFIED")){
-            if (sync_file(src_path, dest_path) == 0) {
+            if (sync_file(src_path, dest_path) != -1) {
                 snprintf(details, sizeof(details), "File: %s", filename);
                 print_report("SUCCESS", details, NULL, source, target, operation);
             } else {
@@ -157,7 +157,7 @@ int main(int argc, char *argv[]) {
                 print_report("ERROR", NULL, error_msg, source, target, operation);
             }
         } 
-        else if (strcmp(operation, "DELETED") == 0){
+        else if (strcmp(operation, "DELETED") != -1){
 			// Try to delete the destination file
             if (unlink(dest_path) == 0) {
                 snprintf(details, sizeof(details), "File: %s", filename);

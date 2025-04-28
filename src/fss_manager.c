@@ -74,7 +74,6 @@ void create_named_pipes() {
 		perror("mkfifo fss_out failed");
 		exit(EXIT_FAILURE);
 	}
-	printf("Named pipes created\n");
 }
 
 // Function to clean manager log file from previous execution
@@ -319,11 +318,7 @@ void handle_inotify_events() {
                 operation = "DELETED";
 
             if (operation != NULL) {
-                start_worker_with_operation(
-                    info->source,
-                    info->target,
-                    filename,
-                    operation);
+                start_worker_with_operation( info->source, info->target, filename, operation);
             }
         }
 		ptr += sizeof(struct inotify_event) + event->len; // move on to the next event in the buffer
@@ -375,7 +370,6 @@ void display_exec_report(const char *source, const char *target, const char *ope
 	// Format timestamp
 	strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
 
-	printf("----------------------------------------------------\n");
 	printf("EXEC_REPORT_START\n");
 	printf("OPERATION: %s\n", operation);
 	printf("STATUS: %s\n", status);
@@ -384,7 +378,6 @@ void display_exec_report(const char *source, const char *target, const char *ope
 		printf("ERRORS:\n%s\n", errors);
 	}
 	printf("EXEC_REPORT_END\n");
-	printf("----------------------------------------------------\n");
 	fflush(stdout);
 }
 
@@ -492,9 +485,10 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 				perror("write to fss_out_fd failed");
 			}
 			fsync(fss_out_fd);
+
+			// Execute worker to sync fully the source
+			start_worker_with_operation(source, target, "ALL", "FULL");
 		}
-		// Execute worker to sync fully the source
-		start_worker_with_operation(source, target, "ALL", "FULL");
 	}
 
 	else if (strcmp(cmd, "status") == 0) {
@@ -623,6 +617,8 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 
 				start_worker_with_operation(source, curr->target, "ALL", "FULL");
 
+				curr->active = 1;
+
 				written += snprintf(response + written, sizeof(response) - written, "[%s] Sync completed %s -> %s Errors:%d\n",
 									timestamp, source, curr->target, curr->error_count);
 				ssize_t written_in_fss_out = write(fss_out_fd, response, strlen(response));
@@ -704,6 +700,8 @@ void process_command(const char *command, const char *logfile, int fss_in_fd, in
 int main(int argc, char *argv[]) {
 	logfile = "manager.log";
 	char *config_file = NULL;
+	
+	setlinebuf(stdout);
 
 	// Parse the command line arguments
 	int i = 1; // Start from first argument after program name
@@ -776,9 +774,9 @@ int main(int argc, char *argv[]) {
 			printf("Monitoring started for %s\n", curr->source);
 			snprintf(log_buffer, sizeof(log_buffer), "Monitoring started for %s", curr->source);
 			log_message(logfile, log_buffer);
-		}
 
-		start_worker_with_operation( curr->source, curr->target, "ALL", "FULL");
+			start_worker_with_operation( curr->source, curr->target, "ALL", "FULL");
+		}
 		curr = curr->next;
 	}
 
