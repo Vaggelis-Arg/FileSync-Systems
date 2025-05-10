@@ -10,17 +10,29 @@
 
 typedef struct sync_info SyncInfo;
 
+typedef struct sync_queue_task SyncTask;
+
 struct sync_info {
-    char source_host[64];
-    int source_port;
-    char source_dir[128];
-    char target_host[64];
+    char source_dir[100];
+	char target_dir[100];
+	char source_host[50];
+    char target_host[50];
     int target_port;
-    char target_dir[128];
+	int source_port;
     int active;
+	int error_count;
     time_t last_sync;
-    int error_count;
     SyncInfo *next;
+};
+
+struct sync_queue_task {
+    char filename[50];
+    char source_dir[100];
+	char target_dir[100];
+	char source_host[50];
+	char target_host[50];
+    int source_port;
+    int target_port;
 };
 
 SyncInfo *sync_info_mem_store = NULL;
@@ -103,10 +115,6 @@ static void parse_config_file(char *config) {
         node->error_count = 0;
         node->next = sync_info_mem_store;
         sync_info_mem_store = node;
-
-		printf("Config: %s@%s:%d -> %s@%s:%d\n",
-            node->source_dir, node->source_host, node->source_port,
-            node->target_dir, node->target_host, node->target_port);
 	}
 }
 
