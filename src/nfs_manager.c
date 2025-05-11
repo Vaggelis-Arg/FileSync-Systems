@@ -35,12 +35,48 @@ struct sync_queue_task {
     int target_port;
 };
 
-SyncInfo *sync_info_mem_store = NULL;
+static SyncInfo *sync_info_mem_store = NULL;
 
-char manager_logfile[40];
-int worker_limit = 5;
-int port_number = 0;
-int buffer_size = 0;
+static SyncTask *task_buffer = NULL;
+static int buffer_head = 0;
+static int buffer_tail = 0;
+static int buffer_count = 0;
+
+static pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
+
+static char manager_logfile[40];
+static int worker_limit = 5;
+static int port_number = 0;
+static int buffer_size = 0;
+
+
+void enqueue_task(SyncTask task) {
+	pthread_mutex_lock(&buffer_mutex); // lock the buffer mutex (no other thread can operate in buffer until current thread finishes)
+	while(buffer_count >= buffer_size) {
+		pthread_cond_wait(&not_full, &buffer_mutex);
+	}
+	task_buffer[buffer_tail] = task;
+	buffer_tail = (buffer_tail + 1) % buffer_size;
+	buffer_count++;
+	pthread_cond_signal(&not_empty); // We added the task, so queue is not empty (signal for any thread which tries to dequeue a task)
+	pthread_mutex_unlock(&buffer_size); // I finished, next thread can now operate in the task queue
+}
+
+SyncTask dequeue() {
+	pthread_mutex_lock(&buffer_mutex);
+	while(buffer_count <= 0) {
+		pthread_cond_wait(&not_empty, &buffer_mutex);
+	}
+	SyncTask task = task_buffer[buffer_head];
+	buffer_head = (buffer_head + 1) % buffer_size;
+	buffer_count--;
+
+	pthread_cond_signal(&not_full); // I just removed a task from the queue so it is definitely not full. If it was and a thread could not enqueue a task, now it can
+	pthread_mutex_unlock(&buffer_mutex);
+	return task;
+}
 
 static void parse_config_file(char *config) {
 	FILE *fp = fopen(config, "r");
@@ -159,6 +195,12 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
     }
+
+	task_buffer = malloc(sizeof(SyncTask) * buffer_size);
+	if (!task_buffer) {
+		fprintf(stderr, "Error in memory allocation\n");
+		exit(EXIT_FAILURE);
+	}
 
 	return 0;
 }
