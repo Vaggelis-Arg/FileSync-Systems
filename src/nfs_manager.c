@@ -7,6 +7,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
 
 typedef struct sync_info SyncInfo;
 
@@ -51,6 +54,18 @@ static int worker_limit = 5;
 static int port_number = 0;
 static int buffer_size = 0;
 
+static void log_sync_result(SyncTask task, const char *operation, const char *result, const char *details) {
+    FILE *fp = fopen(manager_logfile, "a");
+    if (fp == NULL) return;
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%s/%s@%s:%d] [%s/%s@%s:%d] [%ld] [%s] [%s] [%s]\n",
+            t->tm_year + 1900,t->tm_mon + 1, t->tm_mday,t->tm_hour, t->tm_min, t->tm_sec,task.source_dir, task.filename, task.source_host,  task.source_port,
+            task.target_dir, task.filename,task.target_host, task.target_port,pthread_self(), operation, result, details);
+    fclose(fp);
+}
+
+
 
 void enqueue_task(SyncTask task) {
 	pthread_mutex_lock(&buffer_mutex); // lock the buffer mutex (no other thread can operate in buffer until current thread finishes)
@@ -64,7 +79,7 @@ void enqueue_task(SyncTask task) {
 	pthread_mutex_unlock(&buffer_size); // I finished, next thread can now operate in the task queue
 }
 
-SyncTask dequeue() {
+SyncTask dequeue_task() {
 	pthread_mutex_lock(&buffer_mutex);
 	while(buffer_count <= 0) {
 		pthread_cond_wait(&not_empty, &buffer_mutex);
@@ -154,6 +169,8 @@ static void parse_config_file(char *config) {
 	}
 }
 
+void *worker_thread(void) {};
+
 int main(int argc, char *argv[]) {
 	if (argc < 9) {
         fprintf(stderr, "Usage: %s -l <logfile> -c <config_file> [-n <worker_limit>] -p <port_number> -b <bufferSize>\n", argv[0]);
@@ -200,6 +217,20 @@ int main(int argc, char *argv[]) {
 	if (!task_buffer) {
 		fprintf(stderr, "Error in memory allocation\n");
 		exit(EXIT_FAILURE);
+	}
+
+	pthread_t *worker_threads = malloc(worker_limit * sizeof(pthread_t));
+	if(worker_threads == NULL) {
+		fprintf(stderr, "Error in memory allocation\n");
+		exit(EXIT_FAILURE);
+	}
+
+	for(int i = 0 ; i < worker_limit ; i++) {
+		int error = pthread_create(&worker_threads[i], NULL, worker_thread, NULL);
+		if(error) {
+			fprintf(stderr, "Error in thread creation\n");
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	return 0;
