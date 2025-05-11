@@ -169,7 +169,90 @@ static void parse_config_file(char *config) {
 	}
 }
 
-void *worker_thread(void) {};
+void *worker_thread(void) {
+	while(1) {
+		SyncTask curr_task = dequeue_task();
+
+		struct sockaddr_in addr;
+		int src_socket, target_socket;
+
+		if((src_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
+			return NULL;
+		}
+
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(curr_task.source_port);
+
+		inet_pton(AF_INET, curr_task.source_host, &addr.sin_addr); //Convert presentation format address to network format
+
+		if(connect(src_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+			fprintf(stderr, "Failed to connect to source socket\n");
+			close(src_socket);
+			return NULL;
+		}
+
+		if((target_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
+			return NULL;
+		}
+
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(curr_task.target_port);
+
+		inet_pton(AF_INET, curr_task.target_host, &addr.sin_addr); //Convert presentation format address to network format
+
+		if(connect(target_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+			fprintf(stderr, "Failed to connect to target socket\n");
+			close(target_socket);
+			return NULL;
+		}
+
+		char pull_src[100];
+		snprintf(pull_src, sizeof(pull_src), "PULL %s/%s\n", curr_task.source_dir, curr_task.filename);
+		send(src_socket, pull_src, strlen(pull_src), 0); // send pull command to client
+
+		// nfs client sends response <filesize><space><data…>
+
+		// first we read the size:
+		char file_size[20];
+		int bytes_read;
+		if((bytes_read = recv(src_socket, file_size, sizeof(file_size) - 1, 0)) <= 0) {
+			log_sync_result(curr_task, "PULL", "ERROR", "Source sent no response");
+			close(src_socket);
+			continue;
+		}
+		file_size[bytes_read] = '\0';
+
+		long filesize = atol(file_size);
+		if(filesize < 0) {
+			log_sync_result(curr_task, "PULL", "ERROR", "Source response format not appropriate");
+			close(src_socket);
+			continue;
+		}
+
+		char *file_data;
+		if(file_data = malloc(filesize * sizeof(char)) == NULL) {
+			log_sync_result(curr_task, "PULL", "ERROR", "Fail to allocate memory");
+			close(src_socket);
+			exit(EXIT_FAILURE);
+		}
+
+		unsigned int parsed_data = 0;
+		while(parsed_data < filesize) {
+			int new_data = recv(src_socket, file_data + parsed_data, filesize - parsed_data, 0); // write new data in the file_data starting from the "parsed_data" position
+			if(new_data <= 0)
+				break;
+			parsed_data += new_data;
+		}
+
+		char detail_to_log[100];
+		snprintf(detail_to_log, sizeof(detail_to_log), "%ld bytes pulled", parsed_data);
+		log_sync_result(curr_task, "PULL", "SUCCESS", detail_to_log);
+
+		close(src_socket);
+		close(target_socket);
+	}
+
+}
 
 int main(int argc, char *argv[]) {
 	if (argc < 9) {
