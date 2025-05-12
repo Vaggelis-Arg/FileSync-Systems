@@ -76,7 +76,7 @@ void enqueue_task(SyncTask task) {
 	buffer_tail = (buffer_tail + 1) % buffer_size;
 	buffer_count++;
 	pthread_cond_signal(&not_empty); // We added the task, so queue is not empty (signal for any thread which tries to dequeue a task)
-	pthread_mutex_unlock(&buffer_size); // I finished, next thread can now operate in the task queue
+	pthread_mutex_unlock(&buffer_mutex); // I finished, next thread can now operate in the task queue
 }
 
 SyncTask dequeue_task() {
@@ -169,7 +169,7 @@ static void parse_config_file(char *config) {
 	}
 }
 
-void worker_thread(void) {
+void *worker_thread(void *args) {
 	while(1) {
 		SyncTask curr_task = dequeue_task();
 
@@ -207,7 +207,7 @@ void worker_thread(void) {
 			exit(EXIT_FAILURE);
 		}
 
-		char pull_src[100];
+		char pull_src[200];
 		snprintf(pull_src, sizeof(pull_src), "PULL %s/%s\n", curr_task.source_dir, curr_task.filename);
 		send(src_socket, pull_src, strlen(pull_src), 0); // send pull command to client
 
@@ -231,13 +231,13 @@ void worker_thread(void) {
 		}
 
 		char *file_data;
-		if(file_data = malloc(filesize * sizeof(char)) == NULL) {
+		if((file_data = malloc(filesize * sizeof(char))) == NULL) {
 			log_sync_result(curr_task, "PULL", "ERROR", "Fail to allocate memory");
 			close(src_socket);
 			exit(EXIT_FAILURE);
 		}
 
-		unsigned int parsed_data = 0;
+		unsigned long long parsed_data = 0;
 		while(parsed_data < filesize) {
 			int new_data = recv(src_socket, file_data + parsed_data, filesize - parsed_data, 0); // write new data in the file_data starting from the "parsed_data" position
 			if(new_data <= 0)
@@ -246,10 +246,10 @@ void worker_thread(void) {
 		}
 
 		char detail_to_log[100];
-		snprintf(detail_to_log, sizeof(detail_to_log), "%ld bytes pulled", parsed_data);
+		snprintf(detail_to_log, sizeof(detail_to_log), "%lld bytes pulled", parsed_data);
 		log_sync_result(curr_task, "PULL", "SUCCESS", detail_to_log);
 
-		char truncate_to_push[100];
+		char truncate_to_push[200];
 		// first send -1 chunk so that the client will truncate the file
 		snprintf(truncate_to_push, sizeof(truncate_to_push), "PUSH %s/%s -1", curr_task.target_dir, curr_task.filename);
 		send(target_socket, truncate_to_push, strlen(truncate_to_push), 0);
@@ -258,24 +258,24 @@ void worker_thread(void) {
 		long long data_sent = 0;
 		while(data_sent < filesize) {
 			unsigned int chunk_size = (filesize - data_sent < 1024) ? filesize - data_sent : 1024; // we use 1 KB as the default chuck size to load
-			char push_command[100];
+			char push_command[200];
 			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d", curr_task.target_dir, curr_task.filename, chunk_size);
 			send(target_socket, push_command, strlen(push_command), 0); // send push command to the client
 			send(target_socket, file_data + data_sent, chunk_size, 0); // send the current chunk of data
 			data_sent += chunk_size;
 		}
 
-		char no_more_data_to_push[100];
+		char no_more_data_to_push[200];
 		snprintf(no_more_data_to_push, sizeof(no_more_data_to_push), "PUSH %s/%s 0\n", curr_task.target_dir, curr_task.filename);
 		send(target_socket, no_more_data_to_push, sizeof(no_more_data_to_push), 0);
-		snprintf(detail_to_log, sizeof(detail_to_log), "%ld bytes pushed", data_sent);
+		snprintf(detail_to_log, sizeof(detail_to_log), "%lld bytes pushed", data_sent);
 		log_sync_result(curr_task, "PUSH", "SUCCESS", detail_to_log);
 
 		free(file_data);
 		close(src_socket);
 		close(target_socket);
 
-		return;
+		return NULL;
 	}
 
 }
