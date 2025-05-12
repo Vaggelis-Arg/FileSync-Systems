@@ -169,7 +169,7 @@ static void parse_config_file(char *config) {
 	}
 }
 
-void *worker_thread(void) {
+void worker_thread(void) {
 	while(1) {
 		SyncTask curr_task = dequeue_task();
 
@@ -177,7 +177,8 @@ void *worker_thread(void) {
 		int src_socket, target_socket;
 
 		if((src_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
-			return NULL;
+			fprintf(stderr, "Failed to create socket to listen for source dir\n");
+			exit(EXIT_FAILURE);
 		}
 
 		addr.sin_family = AF_INET;
@@ -188,11 +189,11 @@ void *worker_thread(void) {
 		if(connect(src_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 			fprintf(stderr, "Failed to connect to source socket\n");
 			close(src_socket);
-			return NULL;
+			exit(EXIT_FAILURE);
 		}
 
 		if((target_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
-			return NULL;
+			exit(EXIT_FAILURE);
 		}
 
 		addr.sin_family = AF_INET;
@@ -203,7 +204,7 @@ void *worker_thread(void) {
 		if(connect(target_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 			fprintf(stderr, "Failed to connect to target socket\n");
 			close(target_socket);
-			return NULL;
+			exit(EXIT_FAILURE);
 		}
 
 		char pull_src[100];
@@ -248,8 +249,33 @@ void *worker_thread(void) {
 		snprintf(detail_to_log, sizeof(detail_to_log), "%ld bytes pulled", parsed_data);
 		log_sync_result(curr_task, "PULL", "SUCCESS", detail_to_log);
 
+		char truncate_to_push[100];
+		// first send -1 chunk so that the client will truncate the file
+		snprintf(truncate_to_push, sizeof(truncate_to_push), "PUSH %s/%s -1", curr_task.target_dir, curr_task.filename);
+		send(target_socket, truncate_to_push, strlen(truncate_to_push), 0);
+
+		//send data of source dir to target dir in chucks
+		long long data_sent = 0;
+		while(data_sent < filesize) {
+			unsigned int chunk_size = (filesize - data_sent < 1024) ? filesize - data_sent : 1024; // we use 1 KB as the default chuck size to load
+			char push_command[100];
+			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d", curr_task.target_dir, curr_task.filename, chunk_size);
+			send(target_socket, push_command, strlen(push_command), 0); // send push command to the client
+			send(target_socket, file_data + data_sent, chunk_size, 0); // send the current chunk of data
+			data_sent += chunk_size;
+		}
+
+		char no_more_data_to_push[100];
+		snprintf(no_more_data_to_push, sizeof(no_more_data_to_push), "PUSH %s/%s 0\n", curr_task.target_dir, curr_task.filename);
+		send(target_socket, no_more_data_to_push, sizeof(no_more_data_to_push), 0);
+		snprintf(detail_to_log, sizeof(detail_to_log), "%ld bytes pushed", data_sent);
+		log_sync_result(curr_task, "PUSH", "SUCCESS", detail_to_log);
+
+		free(file_data);
 		close(src_socket);
 		close(target_socket);
+
+		return;
 	}
 
 }
