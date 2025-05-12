@@ -65,6 +65,13 @@ static void log_sync_result(SyncTask task, const char *operation, const char *re
     fclose(fp);
 }
 
+// Function to clean manager log file from previous execution
+void clean_logfile(const char *logfile) {
+	FILE *fp = fopen(logfile, "w"); // Open existing file with "write" command so that it will get empty
+	if (!fp)
+		return;
+	fclose(fp); // close the file
+}
 
 
 void enqueue_task(SyncTask task) {
@@ -280,6 +287,100 @@ void *worker_thread(void *args) {
 
 }
 
+void full_sync_available_files(void) {
+	SyncInfo *curr = sync_info_mem_store;
+
+	while(curr != NULL) { //iterate through all the entries in the sync info mem store link to add the tasks in the queue
+		char list_of_files[100][100]; // maximum 100 files per dir
+
+		struct sockaddr_in addr;
+		int socket_ = socket(AF_INET, SOCK_STREAM, 0);
+		if(socket_ < 0) {
+			fprintf(stderr, "Failed to create to socket with TCP protocol\n");
+			return;
+		}
+
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(curr->source_port);
+		if(inet_pton(AF_INET, curr->source_host, &addr.sin_addr) <= 0) {
+			fprintf(stderr, "Failed to convert presentation format address to network format");
+			close(socket_);
+			return;
+		}
+
+		if(connect(socket_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+			fprintf(stderr, "Failed to connect to source socket: %s\n", strerror(errno));
+			close(socket_);
+			return;
+		}
+
+		char list_command[150];
+		snprintf(list_command, sizeof(list_command), "LIST %s\n", curr->source_dir);
+		send(socket_, list_command, strlen(list_command), 0);
+
+		int count_files = 0;
+		FILE *fp = fdopen(socket_, "r");
+		if(fp == NULL) {
+			fprintf(stderr, "Failed to open socket");
+			close(socket_);
+			return;
+		}
+		char temp_line[100];
+		while(fgets(temp_line, sizeof(temp_line), fp)) {
+			if (strcmp(temp_line, ".\n") == 0 || strcmp(temp_line, ".\r\n") == 0) {
+            	break;
+			}
+			else {
+				temp_line[strcspn(temp_line, "\r\n")] = '\0';
+				if(count_files < 100) {
+					strncpy(list_of_files[count_files], temp_line, 100);
+					count_files++;
+				}
+				else {
+					fprintf(stderr, "No more files can be processed. Limit reached.\n");
+					break;
+				}
+			}
+		}
+		fclose(fp);
+
+		if(count_files == 0) {
+			fprintf(stdout, "No files to process from dir: %s\n", curr->source_dir);
+			curr = curr->next;
+			continue;
+		}
+
+		for(int i = 0 ; i < count_files ; i++) {
+			SyncTask curr_task;
+
+			strncpy(curr_task.source_host, curr->source_host, sizeof(curr_task.source_host));
+			curr_task.source_port = curr->source_port;
+			strncpy(curr_task.source_dir, curr->source_dir, sizeof(curr_task.source_dir));
+			strncpy(curr_task.filename, list_of_files[i], sizeof(curr_task.filename));
+			strncpy(curr_task.target_host, curr->target_host, sizeof(curr_task.target_host));
+            curr_task.target_port = curr->target_port;
+            strncpy(curr_task.target_dir, curr->target_dir, sizeof(curr_task.target_dir));
+
+			enqueue_task(curr_task);
+
+			FILE *fp = fopen(manager_logfile, "a");
+			if(fp == NULL) {
+				fprintf(stderr, "Failed to open manager logfile with \'a\'");
+				break;
+			}
+			time_t now = time(NULL);
+			struct tm *t = localtime(&now);
+			fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] Added file: %s/%s@%s:%d -> %s/%s@%s:%d\n",
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+					t->tm_hour, t->tm_min, t->tm_sec,
+					curr_task.source_dir, curr_task.filename, curr_task.source_host, curr_task.source_port,
+					curr_task.target_dir, curr_task.filename, curr_task.target_host, curr_task.target_port);
+			fclose(fp);
+		}
+		curr = curr->next;
+	}
+}
+
 int main(int argc, char *argv[]) {
 	if (argc < 9) {
         fprintf(stderr, "Usage: %s -l <logfile> -c <config_file> [-n <worker_limit>] -p <port_number> -b <bufferSize>\n", argv[0]);
@@ -289,6 +390,7 @@ int main(int argc, char *argv[]) {
 	for (int i = 1; i < argc; i += 2) {
         if (!strcmp(argv[i], "-l") && i + 1 < argc) {
             strncpy(manager_logfile, argv[i + 1], sizeof(manager_logfile));
+			clean_logfile(manager_logfile);
         }
 		else if (!strcmp(argv[i], "-c") && i + 1 < argc) {
 			char config_file[40];
@@ -341,6 +443,8 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	}
+
+	full_sync_available_files();
 
 	return 0;
 }
