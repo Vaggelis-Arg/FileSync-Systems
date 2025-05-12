@@ -66,7 +66,7 @@ static void log_sync_result(SyncTask task, const char *operation, const char *re
 }
 
 // Function to clean manager log file from previous execution
-void clean_logfile(const char *logfile) {
+static void clean_logfile(const char *logfile) {
 	FILE *fp = fopen(logfile, "w"); // Open existing file with "write" command so that it will get empty
 	if (!fp)
 		return;
