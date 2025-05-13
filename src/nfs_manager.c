@@ -185,7 +185,7 @@ void *worker_thread(void *args) {
 
 		if((src_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
 			fprintf(stderr, "Failed to create socket to listen for source dir\n");
-			exit(EXIT_FAILURE);
+			continue;
 		}
 
 		addr.sin_family = AF_INET;
@@ -196,11 +196,11 @@ void *worker_thread(void *args) {
 		if(connect(src_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 			fprintf(stderr, "Failed to connect to source socket\n");
 			close(src_socket);
-			exit(EXIT_FAILURE);
+			continue;
 		}
 
 		if((target_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
-			exit(EXIT_FAILURE);
+			continue;
 		}
 
 		addr.sin_family = AF_INET;
@@ -211,7 +211,7 @@ void *worker_thread(void *args) {
 		if(connect(target_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 			fprintf(stderr, "Failed to connect to target socket\n");
 			close(target_socket);
-			exit(EXIT_FAILURE);
+			continue;
 		}
 
 		char pull_src[200];
@@ -241,7 +241,7 @@ void *worker_thread(void *args) {
 		if((file_data = malloc(filesize * sizeof(char))) == NULL) {
 			log_sync_result(curr_task, "PULL", "ERROR", "Fail to allocate memory");
 			close(src_socket);
-			exit(EXIT_FAILURE);
+			continue;
 		}
 
 		unsigned long long parsed_data = 0;
@@ -281,10 +281,8 @@ void *worker_thread(void *args) {
 		free(file_data);
 		close(src_socket);
 		close(target_socket);
-
-		return NULL;
 	}
-
+	return NULL;
 }
 
 void full_sync_available_files(void) {
@@ -343,7 +341,6 @@ void full_sync_available_files(void) {
 			}
 		}
 		fclose(fp);
-
 		if(count_files == 0) {
 			fprintf(stdout, "No files to process from dir: %s\n", curr->source_dir);
 			curr = curr->next;

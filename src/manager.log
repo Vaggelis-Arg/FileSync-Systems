@@ -1,0 +1,2 @@
+[2025-05-12 23:24:02] Added file: ../client1_dir/file1.txt@127.0.0.1:8001 -> ../client2_dir/file1.txt@127.0.0.1:8002
+[2025-05-12 23:24:02] Added file: ../client1_dir/file2.txt@127.0.0.1:8001 -> ../client2_dir/file2.txt@127.0.0.1:8002

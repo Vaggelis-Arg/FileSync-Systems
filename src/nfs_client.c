@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -22,7 +23,7 @@ static void handle_list(int connfd, char *dir) {
 
 	struct dirent *file;
 	while((file = readdir(dirptr)) != NULL) {
-		if(strcmp(file->d_name, ".") || strcmp(file->d_name, "..")) {
+		if (strcmp(file->d_name, ".") != 0 && strcmp(file->d_name, "..") != 0) {
 			dprintf(connfd, "%s\n", file->d_name);
 		}
 	}
@@ -42,9 +43,10 @@ static void handle_pull(int connfd, char *filepath) {
 	fstat(fd, &st);
 	long filesize = st.st_size;
 
-	dprintf(connfd, "%ld", filesize);
+	dprintf(connfd, "%ld ", filesize);
 	char read_buffer[1024];
 	ssize_t bytes_read;
+	printf("pull command\n");
 	while((bytes_read = read(fd, read_buffer, sizeof(read_buffer))) > 0) {
 		send(connfd, read_buffer, bytes_read, 0);
 	}
@@ -57,7 +59,7 @@ static void handle_push(int connfd, char *line) {
     sscanf(line, "%s %s %d", command, filepath, &chunk_size);
 
 	static FILE *fp = NULL;
-
+	printf("push command\n");
 	if(chunk_size == -1) {
 		fp = fopen(filepath, "w");
 		if(fp == NULL) {
@@ -76,8 +78,10 @@ static void handle_push(int connfd, char *line) {
 		char *data = strchr(line, ' '); // parse until PUSH command
         data = strchr(data + 1, ' '); // parse until the file path
         data = strchr(data + 1, ' '); // parse until the chunk size
-        if (fp)
+        if (fp && data) {
 			fwrite(data + 1, 1, chunk_size, fp); // write the data (what's left) in the file
+			fflush(fp);
+		}
 	}
 }
 
@@ -107,4 +111,52 @@ static void handle_connection(int connfd) {
 		}
 	}
 	fclose(fp);
+}
+
+
+int main(int argc, char *argv[]) {
+	if (argc != 3 || strcmp(argv[1], "-p") != 0) {
+        fprintf(stderr, "Usage: %s -p <port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+	int port = atoi(argv[2]);
+	int listenfd, connfd;
+	struct sockaddr_in servaddr, cliaddr;
+	socklen_t len;
+
+	listenfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (listenfd < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
+
+	int optval = 1;
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(port);
+
+    if (bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        perror("bind");
+        exit(EXIT_FAILURE);
+    }
+
+    listen(listenfd, 10);
+    printf("nfs_client listening on port %d...\n", port);
+
+    while (1) {
+        len = sizeof(cliaddr);
+        connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &len);
+        if (connfd < 0) {
+            perror("accept");
+            continue;
+        }
+
+        handle_connection(connfd);
+        close(connfd);
+    }
+
+    return 0;
 }
