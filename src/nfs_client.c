@@ -17,17 +17,19 @@
 static void handle_list(int connfd, char *dir) {
 	DIR *dirptr = opendir(dir);
 	if(dirptr == NULL) {
-		dprintf(connfd, ".\n"); // There is nothing to send to the socket
+		write(connfd, ".\n", 2); // There is nothing to send to the socket
 		return;
 	}
 
 	struct dirent *file;
 	while((file = readdir(dirptr)) != NULL) {
 		if (strcmp(file->d_name, ".") != 0 && strcmp(file->d_name, "..") != 0) {
-			dprintf(connfd, "%s\n", file->d_name);
+			char buffer[300];
+			snprintf(buffer, sizeof(buffer), "%s\n", file->d_name);
+			write(connfd, buffer, strlen(buffer));
 		}
 	}
-	dprintf(connfd, ".\n");
+	write(connfd, ".\n", 2);
 	closedir(dirptr);
 }
 
@@ -43,10 +45,12 @@ static void handle_pull(int connfd, char *filepath) {
 	fstat(fd, &st);
 	long filesize = st.st_size;
 
-	dprintf(connfd, "%ld ", filesize);
+	char buffer[100];
+	int len = snprintf(buffer, sizeof(buffer), "%ld ", filesize);
+	write(connfd, buffer, len);
 	char read_buffer[1024];
 	ssize_t bytes_read;
-	printf("pull command\n");
+
 	while((bytes_read = read(fd, read_buffer, sizeof(read_buffer))) > 0) {
 		send(connfd, read_buffer, bytes_read, 0);
 	}
@@ -59,7 +63,7 @@ static void handle_push(int connfd, char *line) {
     sscanf(line, "%s %s %d", command, filepath, &chunk_size);
 
 	static FILE *fp = NULL;
-	printf("push command\n");
+
 	if(chunk_size == -1) {
 		fp = fopen(filepath, "w");
 		if(fp == NULL) {
@@ -105,8 +109,6 @@ static void handle_connection(int connfd) {
 			handle_pull(connfd, arg1);
 		}
 		else if(!strcmp(command, "PUSH")) {
-			int chunk_size;
-			sscanf(line, "%s %s %d", command, arg1, &chunk_size);
 			handle_push(connfd, line);
 		}
 	}

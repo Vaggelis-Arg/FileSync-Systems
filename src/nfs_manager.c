@@ -54,6 +54,11 @@ static int worker_limit = 5;
 static int port_number = 0;
 static int buffer_size = 0;
 
+static int total_tasks = 0;
+static int completed_tasks = 0;
+static pthread_mutex_t task_done_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t all_tasks_done = PTHREAD_COND_INITIALIZER;
+
 static void log_sync_result(SyncTask task, const char *operation, const char *result, const char *details) {
     FILE *fp = fopen(manager_logfile, "a");
     if (fp == NULL) return;
@@ -82,6 +87,9 @@ void enqueue_task(SyncTask task) {
 	task_buffer[buffer_tail] = task;
 	buffer_tail = (buffer_tail + 1) % buffer_size;
 	buffer_count++;
+	pthread_mutex_lock(&task_done_mutex);
+	total_tasks++;
+	pthread_mutex_unlock(&task_done_mutex);
 	pthread_cond_signal(&not_empty); // We added the task, so queue is not empty (signal for any thread which tries to dequeue a task)
 	pthread_mutex_unlock(&buffer_mutex); // I finished, next thread can now operate in the task queue
 }
@@ -221,16 +229,25 @@ void *worker_thread(void *args) {
 		// nfs client sends response <filesize><space><data…>
 
 		// first we read the size:
-		char file_size[20];
-		int bytes_read;
-		if((bytes_read = recv(src_socket, file_size, sizeof(file_size) - 1, 0)) <= 0) {
-			log_sync_result(curr_task, "PULL", "ERROR", "Source sent no response");
-			close(src_socket);
-			continue;
+		char file_size_buf[100];
+		int i = 0;
+		char ch;
+		while (i < sizeof(file_size_buf) - 1) {
+			int r = recv(src_socket, &ch, 1, 0);
+			if (r <= 0) {
+				log_sync_result(curr_task, "PULL", "ERROR", "Failed to read file size");
+				close(src_socket);
+				continue;
+			}
+			if (ch == ' ') {
+				break;
+			}
+			file_size_buf[i++] = ch;
 		}
-		file_size[bytes_read] = '\0';
+		file_size_buf[i] = '\0';
 
-		long filesize = atol(file_size);
+		long filesize = atol(file_size_buf);
+
 		if(filesize < 0) {
 			log_sync_result(curr_task, "PULL", "ERROR", "Source response format not appropriate");
 			close(src_socket);
@@ -258,7 +275,7 @@ void *worker_thread(void *args) {
 
 		char truncate_to_push[200];
 		// first send -1 chunk so that the client will truncate the file
-		snprintf(truncate_to_push, sizeof(truncate_to_push), "PUSH %s/%s -1", curr_task.target_dir, curr_task.filename);
+		snprintf(truncate_to_push, sizeof(truncate_to_push), "PUSH %s/%s -1\n", curr_task.target_dir, curr_task.filename);
 		send(target_socket, truncate_to_push, strlen(truncate_to_push), 0);
 
 		//send data of source dir to target dir in chucks
@@ -266,7 +283,7 @@ void *worker_thread(void *args) {
 		while(data_sent < filesize) {
 			unsigned int chunk_size = (filesize - data_sent < 1024) ? filesize - data_sent : 1024; // we use 1 KB as the default chuck size to load
 			char push_command[200];
-			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d", curr_task.target_dir, curr_task.filename, chunk_size);
+			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d ", curr_task.target_dir, curr_task.filename, chunk_size);
 			send(target_socket, push_command, strlen(push_command), 0); // send push command to the client
 			send(target_socket, file_data + data_sent, chunk_size, 0); // send the current chunk of data
 			data_sent += chunk_size;
@@ -281,6 +298,13 @@ void *worker_thread(void *args) {
 		free(file_data);
 		close(src_socket);
 		close(target_socket);
+
+		pthread_mutex_lock(&task_done_mutex);
+		completed_tasks++;
+		if (completed_tasks == total_tasks) {
+			pthread_cond_signal(&all_tasks_done);  // Wake up the main thread
+		}
+		pthread_mutex_unlock(&task_done_mutex);
 	}
 	return NULL;
 }
@@ -442,6 +466,18 @@ int main(int argc, char *argv[]) {
 	}
 
 	full_sync_available_files();
+
+	pthread_mutex_lock(&task_done_mutex);
+	while (completed_tasks < total_tasks) {
+		pthread_cond_wait(&all_tasks_done, &task_done_mutex);
+	}
+	pthread_mutex_unlock(&task_done_mutex);
+
+	for (int i = 0; i < worker_limit; i++) {
+		pthread_cancel(worker_threads[i]); // end threads that are infinite loops
+		pthread_join(worker_threads[i], NULL);
+	}
+
 
 	return 0;
 }
