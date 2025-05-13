@@ -1,0 +1,6 @@
+[2025-05-14 00:05:05] Added file: ../client1_dir/file1.txt@127.0.0.1:8001 -> ../client2_dir/file1.txt@127.0.0.1:8002
+[2025-05-14 00:05:05] Added file: ../client1_dir/file2.txt@127.0.0.1:8001 -> ../client2_dir/file2.txt@127.0.0.1:8002
+[2025-05-14 00:05:05] [../client1_dir/file2.txt@127.0.0.1:8001] [../client2_dir/file2.txt@127.0.0.1:8002] [140561631561408] [PULL] [SUCCESS] [18 bytes pulled]
+[2025-05-14 00:05:05] [../client1_dir/file2.txt@127.0.0.1:8001] [../client2_dir/file2.txt@127.0.0.1:8002] [140561631561408] [PUSH] [SUCCESS] [18 bytes pushed]
+[2025-05-14 00:05:05] [../client1_dir/file1.txt@127.0.0.1:8001] [../client2_dir/file1.txt@127.0.0.1:8002] [140561639954112] [PULL] [SUCCESS] [18 bytes pulled]
+[2025-05-14 00:05:05] [../client1_dir/file1.txt@127.0.0.1:8001] [../client2_dir/file1.txt@127.0.0.1:8002] [140561639954112] [PUSH] [SUCCESS] [18 bytes pushed]

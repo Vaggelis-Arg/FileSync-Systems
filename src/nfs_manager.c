@@ -184,7 +184,7 @@ static void parse_config_file(char *config) {
 	}
 }
 
-void *worker_thread(void *args) {
+void *worker_thread(void) {
 	while(1) {
 		SyncTask curr_task = dequeue_task();
 
@@ -230,7 +230,7 @@ void *worker_thread(void *args) {
 
 		// first we read the size:
 		char file_size_buf[100];
-		int i = 0;
+		long unsigned int i = 0;
 		char ch;
 		while (i < sizeof(file_size_buf) - 1) {
 			int r = recv(src_socket, &ch, 1, 0);
@@ -261,7 +261,7 @@ void *worker_thread(void *args) {
 			continue;
 		}
 
-		unsigned long long parsed_data = 0;
+		long parsed_data = 0;
 		while(parsed_data < filesize) {
 			int new_data = recv(src_socket, file_data + parsed_data, filesize - parsed_data, 0); // write new data in the file_data starting from the "parsed_data" position
 			if(new_data <= 0)
