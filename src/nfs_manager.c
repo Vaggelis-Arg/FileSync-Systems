@@ -59,6 +59,8 @@ static int completed_tasks = 0;
 static pthread_mutex_t task_done_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t all_tasks_done = PTHREAD_COND_INITIALIZER;
 
+static int shutting_down = 0;
+
 static void log_sync_result(SyncTask task, const char *operation, const char *result, const char *details) {
     FILE *fp = fopen(manager_logfile, "a");
     if (fp == NULL) return;
@@ -97,6 +99,10 @@ void enqueue_task(SyncTask task) {
 SyncTask dequeue_task() {
 	pthread_mutex_lock(&buffer_mutex);
 	while(buffer_count <= 0) {
+		if (shutting_down) {
+			pthread_mutex_unlock(&buffer_mutex);
+			pthread_exit(NULL);  // exit the thread if we're shutting down
+		}
 		pthread_cond_wait(&not_empty, &buffer_mutex);
 	}
 	SyncTask task = task_buffer[buffer_head];
@@ -501,23 +507,50 @@ int main(int argc, char *argv[]) {
 
 	char command_read[300];
 	ssize_t bytes_read;
-	if((bytes_read = read(connection_fd, command_read, sizeof(command_read) -1)) > 0) {
+	if ((bytes_read = read(connection_fd, command_read, sizeof(command_read) - 1)) > 0) {
 		command_read[bytes_read] = '\0';
+
+		// Remove trailing newline
+		command_read[strcspn(command_read, "\r\n")] = '\0';
+
 		printf("Command received: %s\n", command_read);
+
+		if (strcmp(command_read, "shutdown") == 0) {
+			const char *response = "Shutting down manager...\n";
+			send(connection_fd, response, strlen(response), 0);
+
+			pthread_mutex_lock(&task_done_mutex);
+			while (completed_tasks < total_tasks) {
+				pthread_cond_wait(&all_tasks_done, &task_done_mutex);
+			}
+			pthread_mutex_unlock(&task_done_mutex);
+
+			shutting_down = 1;
+
+			// Wake all waiting worker threads
+			pthread_cond_broadcast(&not_empty);
+			pthread_cond_broadcast(&not_full);
+
+			for (int i = 0; i < worker_limit; i++) {
+				pthread_cancel(worker_threads[i]); // terminates infinite-loop threads
+				pthread_join(worker_threads[i], NULL);
+			}
+
+			free(worker_threads);
+			free(task_buffer);
+			close(server_fd);
+			close(connection_fd);
+
+			printf("Shutdown complete.\n");
+			exit(EXIT_SUCCESS);
+		}
+		else {
+			const char *response = "Unknown command\n";
+			send(connection_fd, response, strlen(response), 0);
+		}
 	}
+
 	close(connection_fd);
-
-	pthread_mutex_lock(&task_done_mutex);
-	while (completed_tasks < total_tasks) {
-		pthread_cond_wait(&all_tasks_done, &task_done_mutex);
-	}
-	pthread_mutex_unlock(&task_done_mutex);
-
-	for (int i = 0; i < worker_limit; i++) {
-		pthread_cancel(worker_threads[i]); // end threads that are infinite loops
-		pthread_join(worker_threads[i], NULL);
-	}
-
 
 	return 0;
 }
