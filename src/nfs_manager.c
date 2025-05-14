@@ -49,7 +49,7 @@ static pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
 
-static char manager_logfile[40];
+static char manager_logfile[60];
 static int worker_limit = 5;
 static int port_number = 0;
 static int buffer_size = 0;
@@ -184,7 +184,7 @@ static void parse_config_file(char *config) {
 	}
 }
 
-void *worker_thread(void) {
+void *worker_thread(void *arg) {
 	while(1) {
 		SyncTask curr_task = dequeue_task();
 
@@ -270,7 +270,7 @@ void *worker_thread(void) {
 		}
 
 		char detail_to_log[100];
-		snprintf(detail_to_log, sizeof(detail_to_log), "%lld bytes pulled", parsed_data);
+		snprintf(detail_to_log, sizeof(detail_to_log), "%ld bytes pulled", parsed_data);
 		log_sync_result(curr_task, "PULL", "SUCCESS", detail_to_log);
 
 		char truncate_to_push[200];

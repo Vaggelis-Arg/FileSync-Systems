@@ -10,24 +10,29 @@ CLIENT2_DIR := client2_dir
 
 MANAGER := nfs_manager
 CLIENT := nfs_client
+CONSOLE := nfs_console
 
 MANAGER_SRC := $(SRC_DIR)/nfs_manager.c
 CLIENT_SRC := $(SRC_DIR)/nfs_client.c
+CONSOLE_SRC := $(SRC_DIR)/nfs_console.c
 
 MANAGER_LOG := manager.log
 
 CC := gcc
-CFLAGS := -Wall -Wextra -pthread -O2
+CFLAGS := -pthread -O2
 
 # === DEFAULT TARGET ===
 .PHONY: all
-all: $(MANAGER) $(CLIENT)
+all: $(MANAGER) $(CLIENT) $(CONSOLE)
 
 # === BUILD TARGETS ===
 $(MANAGER): $(MANAGER_SRC)
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(CLIENT): $(CLIENT_SRC)
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(CONSOLE): $(CONSOLE_SRC)
 	$(CC) $(CFLAGS) -o $@ $<
 
 # === CLEAN TARGET ===
