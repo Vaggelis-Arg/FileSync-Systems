@@ -467,6 +467,46 @@ int main(int argc, char *argv[]) {
 
 	full_sync_available_files();
 
+	int server_fd, connection_fd;
+	struct sockaddr_in server_addr, client_addr;
+	socklen_t client_len = sizeof(client_addr);
+
+	server_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if(server_fd < 0) {
+		perror("socket");
+		exit(EXIT_FAILURE);
+	}
+
+	int optval = 1;
+	setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+	memset(&server_addr, 0, sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = INADDR_ANY;
+	server_addr.sin_port = htons(port_number);
+
+	if(bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+		perror("bind");
+		exit(EXIT_FAILURE);
+	}
+
+	listen(server_fd, 5);
+	printf("nfs_manager listening for console commands on port %d...\n", port_number);
+
+	connection_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+	if(connection_fd < 0) {
+		perror("accept");
+		exit(EXIT_FAILURE);
+	}
+
+	char command_read[300];
+	ssize_t bytes_read;
+	if((bytes_read = read(connection_fd, command_read, sizeof(command_read) -1)) > 0) {
+		command_read[bytes_read] = '\0';
+		printf("Command received: %s\n", command_read);
+	}
+	close(connection_fd);
+
 	pthread_mutex_lock(&task_done_mutex);
 	while (completed_tasks < total_tasks) {
 		pthread_cond_wait(&all_tasks_done, &task_done_mutex);
