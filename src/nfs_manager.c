@@ -316,6 +316,9 @@ void *worker_thread(void *arg) {
 }
 
 void sync_pair_files(SyncInfo *curr) {
+	if (!curr->active)
+		return;
+	
 	char list_of_files[100][100]; // maximum 100 files per dir
 
 	struct sockaddr_in addr;
@@ -601,6 +604,34 @@ int main(int argc, char *argv[]) {
 
 			const char *resp = "New sync pair added\n";
 			send(connection_fd, resp, strlen(resp), 0);
+		}
+		else if (strncmp(command_read, "cancel ", 7) == 0) {
+			char src_dir[100];
+
+			if (sscanf(command_read + 7, "%s", src_dir) != 1) {
+				const char *resp = "Incorrect cancel command format.\n";
+				send(connection_fd, resp, strlen(resp), 0);
+				close(connection_fd);
+			}
+
+			int cancelled = 0;
+			SyncInfo *curr = sync_info_mem_store;
+			while (curr != NULL) {
+				if (!strcmp(curr->source_dir, src_dir)) {
+					curr->active = 0;
+					cancelled = 1;
+					break;
+				}
+				curr = curr->next;
+			}
+
+			if (cancelled) {
+				send(connection_fd, "Sync canceled successfully.\n", 29, 0);
+			} else {
+				send(connection_fd, "No matching sync found.\n", 25, 0);
+			}
+
+			close(connection_fd);
 		}
 		else {
 			const char *response = "Unknown command\n";
