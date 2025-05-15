@@ -17,6 +17,7 @@ CLIENT_SRC := $(SRC_DIR)/nfs_client.c
 CONSOLE_SRC := $(SRC_DIR)/nfs_console.c
 
 MANAGER_LOG := manager.log
+CONSOLE_LOG := console.log
 
 CC := gcc
 CFLAGS := -pthread -O2
@@ -38,7 +39,7 @@ $(CONSOLE): $(CONSOLE_SRC)
 # === CLEAN TARGET ===
 .PHONY: clean
 clean:
-	@rm -f $(MANAGER) $(CLIENT) $(CONSOLE) $(MANAGER_LOG)
+	@rm -f $(MANAGER) $(CLIENT) $(CONSOLE) $(MANAGER_LOG) $(CONSOLE_LOG)
 	@rm -f $(CLIENT2_DIR)/*.txt
 
 # === HELP TARGET ===

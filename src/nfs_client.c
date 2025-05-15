@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -17,7 +18,9 @@
 static void handle_list(int connfd, char *dir) {
 	DIR *dirptr = opendir(dir);
 	if(dirptr == NULL) {
-		write(connfd, ".\n", 2); // There is nothing to send to the socket
+		if (write(connfd, ".\n", 2) < 0)
+			// There is nothing to send to the socket
+			perror("write");
 		return;
 	}
 
@@ -26,10 +29,13 @@ static void handle_list(int connfd, char *dir) {
 		if (strcmp(file->d_name, ".") != 0 && strcmp(file->d_name, "..") != 0) {
 			char buffer[300];
 			snprintf(buffer, sizeof(buffer), "%s\n", file->d_name);
-			write(connfd, buffer, strlen(buffer));
+			if (write(connfd, buffer, strlen(buffer)) < 0)
+				perror("write");
 		}
 	}
-	write(connfd, ".\n", 2);
+	if(write(connfd, ".\n", 2) < 0) {
+		perror("write");		
+	}
 	closedir(dirptr);
 }
 
@@ -47,7 +53,8 @@ static void handle_pull(int connfd, char *filepath) {
 
 	char buffer[100];
 	int len = snprintf(buffer, sizeof(buffer), "%ld ", filesize);
-	write(connfd, buffer, len);
+	if(write(connfd, buffer, len) < 0)
+		perror("write");
 	char read_buffer[1024];
 	ssize_t bytes_read;
 

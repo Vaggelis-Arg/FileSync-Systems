@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netdb.h>
 
 
@@ -179,6 +180,13 @@ static void parse_config_file(char *config) {
         strncpy(node->source_host, src_host, sizeof(node->source_host));
         node->source_port = src_port;
         strncpy(node->target_dir, target_path, sizeof(node->target_dir));
+		struct stat st = {0};
+		if (stat(node->target_dir, &st) == -1) { // if target dir does not exist -> create it
+			if (mkdir(node->target_dir, 0755) < 0) {
+				perror("mkdir");
+			}
+		}
+
         strncpy(node->target_host, target_host, sizeof(node->target_host));
         node->target_port = target_port;
 
@@ -581,6 +589,17 @@ int main(int argc, char *argv[]) {
 			}
 			*target_path_end = '\0';
 			strncpy(node->target_dir, target, sizeof(node->target_dir));
+
+			struct stat st = {0};
+			if (stat(node->target_dir, &st) == -1) {
+				if (mkdir(node->target_dir, 0755) < 0) {
+					perror("mkdir");
+					send(connection_fd, "Failed to create target directory\n", 34, 0);
+					free(node);
+					close(connection_fd);
+					return 0;
+				}
+			}
 
 			char *target_host_end = strchr(target_path_end + 1, ':');
 			if (!target_host_end) {
