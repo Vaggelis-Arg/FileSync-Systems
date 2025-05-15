@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	char command_to_send[1000];
-	printf(">");
+	printf("> ");
 	if(!fgets(command_to_send, sizeof(command_to_send), stdin)) {
 		fprintf(stderr, "Error reading command\n");
 		exit(EXIT_FAILURE);
@@ -68,6 +68,7 @@ int main(int argc, char *argv[]) {
 	ssize_t received_bytes = recv(sockfd, response, sizeof(response) - 1, 0);
 	if(received_bytes > 0) {
 		response[received_bytes] = '\0';
+		printf("%s", response);
 	}
 
 	close(sockfd);

@@ -315,96 +315,90 @@ void *worker_thread(void *arg) {
 	return NULL;
 }
 
-void full_sync_available_files(void) {
-	SyncInfo *curr = sync_info_mem_store;
+void sync_pair_files(SyncInfo *curr) {
+	char list_of_files[100][100]; // maximum 100 files per dir
 
-	while(curr != NULL) { //iterate through all the entries in the sync info mem store link to add the tasks in the queue
-		char list_of_files[100][100]; // maximum 100 files per dir
+	struct sockaddr_in addr;
+	int socket_ = socket(AF_INET, SOCK_STREAM, 0);
+	if(socket_ < 0) {
+		fprintf(stderr, "Failed to create to socket with TCP protocol\n");
+		return;
+	}
 
-		struct sockaddr_in addr;
-		int socket_ = socket(AF_INET, SOCK_STREAM, 0);
-		if(socket_ < 0) {
-			fprintf(stderr, "Failed to create to socket with TCP protocol\n");
-			return;
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(curr->source_port);
+	if(inet_pton(AF_INET, curr->source_host, &addr.sin_addr) <= 0) {
+		fprintf(stderr, "Failed to convert presentation format address to network format");
+		close(socket_);
+		return;
+	}
+
+	if(connect(socket_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		fprintf(stderr, "Failed to connect to source socket: %s\n", strerror(errno));
+		close(socket_);
+		return;
+	}
+
+	char list_command[150];
+	snprintf(list_command, sizeof(list_command), "LIST %s\n", curr->source_dir);
+	send(socket_, list_command, strlen(list_command), 0);
+
+	int count_files = 0;
+	FILE *fp = fdopen(socket_, "r");
+	if(fp == NULL) {
+		fprintf(stderr, "Failed to open socket");
+		close(socket_);
+		return;
+	}
+	char temp_line[100];
+	while(fgets(temp_line, sizeof(temp_line), fp)) {
+		if (strcmp(temp_line, ".\n") == 0 || strcmp(temp_line, ".\r\n") == 0) {
+			break;
 		}
-
-		addr.sin_family = AF_INET;
-		addr.sin_port = htons(curr->source_port);
-		if(inet_pton(AF_INET, curr->source_host, &addr.sin_addr) <= 0) {
-			fprintf(stderr, "Failed to convert presentation format address to network format");
-			close(socket_);
-			return;
-		}
-
-		if(connect(socket_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-			fprintf(stderr, "Failed to connect to source socket: %s\n", strerror(errno));
-			close(socket_);
-			return;
-		}
-
-		char list_command[150];
-		snprintf(list_command, sizeof(list_command), "LIST %s\n", curr->source_dir);
-		send(socket_, list_command, strlen(list_command), 0);
-
-		int count_files = 0;
-		FILE *fp = fdopen(socket_, "r");
-		if(fp == NULL) {
-			fprintf(stderr, "Failed to open socket");
-			close(socket_);
-			return;
-		}
-		char temp_line[100];
-		while(fgets(temp_line, sizeof(temp_line), fp)) {
-			if (strcmp(temp_line, ".\n") == 0 || strcmp(temp_line, ".\r\n") == 0) {
-            	break;
+		else {
+			temp_line[strcspn(temp_line, "\r\n")] = '\0';
+			if(count_files < 100) {
+				strncpy(list_of_files[count_files], temp_line, 100);
+				count_files++;
 			}
 			else {
-				temp_line[strcspn(temp_line, "\r\n")] = '\0';
-				if(count_files < 100) {
-					strncpy(list_of_files[count_files], temp_line, 100);
-					count_files++;
-				}
-				else {
-					fprintf(stderr, "No more files can be processed. Limit reached.\n");
-					break;
-				}
-			}
-		}
-		fclose(fp);
-		if(count_files == 0) {
-			fprintf(stdout, "No files to process from dir: %s\n", curr->source_dir);
-			curr = curr->next;
-			continue;
-		}
-
-		for(int i = 0 ; i < count_files ; i++) {
-			SyncTask curr_task;
-
-			strncpy(curr_task.source_host, curr->source_host, sizeof(curr_task.source_host));
-			curr_task.source_port = curr->source_port;
-			strncpy(curr_task.source_dir, curr->source_dir, sizeof(curr_task.source_dir));
-			strncpy(curr_task.filename, list_of_files[i], sizeof(curr_task.filename));
-			strncpy(curr_task.target_host, curr->target_host, sizeof(curr_task.target_host));
-            curr_task.target_port = curr->target_port;
-            strncpy(curr_task.target_dir, curr->target_dir, sizeof(curr_task.target_dir));
-
-			enqueue_task(curr_task);
-
-			FILE *fp = fopen(manager_logfile, "a");
-			if(fp == NULL) {
-				fprintf(stderr, "Failed to open manager logfile with \'a\'");
+				fprintf(stderr, "No more files can be processed. Limit reached.\n");
 				break;
 			}
-			time_t now = time(NULL);
-			struct tm *t = localtime(&now);
-			fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] Added file: %s/%s@%s:%d -> %s/%s@%s:%d\n",
-					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-					t->tm_hour, t->tm_min, t->tm_sec,
-					curr_task.source_dir, curr_task.filename, curr_task.source_host, curr_task.source_port,
-					curr_task.target_dir, curr_task.filename, curr_task.target_host, curr_task.target_port);
-			fclose(fp);
 		}
-		curr = curr->next;
+	}
+	fclose(fp);
+	if(count_files == 0) {
+		fprintf(stdout, "No files to process from dir: %s\n", curr->source_dir);
+		return;
+	}
+
+	for(int i = 0 ; i < count_files ; i++) {
+		SyncTask curr_task;
+
+		strncpy(curr_task.source_host, curr->source_host, sizeof(curr_task.source_host));
+		curr_task.source_port = curr->source_port;
+		strncpy(curr_task.source_dir, curr->source_dir, sizeof(curr_task.source_dir));
+		strncpy(curr_task.filename, list_of_files[i], sizeof(curr_task.filename));
+		strncpy(curr_task.target_host, curr->target_host, sizeof(curr_task.target_host));
+		curr_task.target_port = curr->target_port;
+		strncpy(curr_task.target_dir, curr->target_dir, sizeof(curr_task.target_dir));
+
+		enqueue_task(curr_task);
+
+		FILE *fp = fopen(manager_logfile, "a");
+		if(fp == NULL) {
+			fprintf(stderr, "Failed to open manager logfile with \'a\'");
+			break;
+		}
+		time_t now = time(NULL);
+		struct tm *t = localtime(&now);
+		fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] Added file: %s/%s@%s:%d -> %s/%s@%s:%d\n",
+				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+				t->tm_hour, t->tm_min, t->tm_sec,
+				curr_task.source_dir, curr_task.filename, curr_task.source_host, curr_task.source_port,
+				curr_task.target_dir, curr_task.filename, curr_task.target_host, curr_task.target_port);
+		fclose(fp);
 	}
 }
 
@@ -471,7 +465,12 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	full_sync_available_files();
+	// FULL sync all the files in sync_info_mem_store (currently all files we parsed from the config file)
+	SyncInfo *curr = sync_info_mem_store;
+	while (curr) {
+		sync_pair_files(curr);
+		curr = curr->next;
+	}
 
 	int server_fd, connection_fd;
 	struct sockaddr_in server_addr, client_addr;
@@ -529,7 +528,6 @@ int main(int argc, char *argv[]) {
 
 			// Wake all waiting worker threads
 			pthread_cond_broadcast(&not_empty);
-			pthread_cond_broadcast(&not_full);
 
 			for (int i = 0; i < worker_limit; i++) {
 				pthread_cancel(worker_threads[i]); // terminates infinite-loop threads
@@ -543,6 +541,66 @@ int main(int argc, char *argv[]) {
 
 			printf("Shutdown complete.\n");
 			exit(EXIT_SUCCESS);
+		}
+		else if (strncmp(command_read, "add ", 4) == 0) {
+			char src[100], target[100];
+			if (sscanf(command_read + 4, "%s %s", src, target) != 2) {
+				const char *resp = "Incorrect add command\n";
+				send(connection_fd, resp, strlen(resp), 0);
+			}
+
+			SyncInfo *node = malloc(sizeof(*node));
+			if (!node) {
+				send(connection_fd, "Error in memory allocation\n", 26, 0);
+			}
+
+			char *src_path_end = strchr(src, '@');
+			if (!src_path_end) {
+				send(connection_fd, "Invalid source format\n", 23, 0);
+				free(node);
+			}
+			*src_path_end = '\0';
+			strncpy(node->source_dir, src, sizeof(node->source_dir));
+
+			char *src_host_end = strchr(src_path_end + 1, ':');
+			if (!src_host_end) {
+				send(connection_fd, "Invalid source format\n", 23, 0);
+				free(node);
+			}
+			*src_host_end = '\0';
+			strncpy(node->source_host, src_path_end + 1, sizeof(node->source_host));
+			node->source_port = atoi(src_host_end + 1);
+
+			char *target_path_end = strchr(target, '@');
+			if (!target_path_end) {
+				send(connection_fd, "Invalid target format\n", 23, 0);
+				free(node);
+			}
+			*target_path_end = '\0';
+			strncpy(node->target_dir, target, sizeof(node->target_dir));
+
+			char *target_host_end = strchr(target_path_end + 1, ':');
+			if (!target_host_end) {
+				send(connection_fd, "Invalid target format\n", 23, 0);
+				free(node);
+			}
+			*target_host_end = '\0';
+			strncpy(node->target_host, target_path_end + 1, sizeof(node->target_host));
+			node->target_port = atoi(target_host_end + 1);
+
+			node->active = 1;
+			node->last_sync = 0;
+			node->error_count = 0;
+
+			// Add to front of sync_info_mem_store list
+			node->next = sync_info_mem_store;
+			sync_info_mem_store = node;
+
+			// sync current pair
+			sync_pair_files(node);
+
+			const char *resp = "New sync pair added\n";
+			send(connection_fd, resp, strlen(resp), 0);
 		}
 		else {
 			const char *response = "Unknown command\n";

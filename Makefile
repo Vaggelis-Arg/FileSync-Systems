@@ -38,7 +38,7 @@ $(CONSOLE): $(CONSOLE_SRC)
 # === CLEAN TARGET ===
 .PHONY: clean
 clean:
-	@rm -f $(MANAGER) $(CLIENT) $(MANAGER_LOG)
+	@rm -f $(MANAGER) $(CLIENT) $(CONSOLE) $(MANAGER_LOG)
 	@rm -f $(CLIENT2_DIR)/*.txt
 
 # === HELP TARGET ===
