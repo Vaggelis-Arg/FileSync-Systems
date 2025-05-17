@@ -196,6 +196,7 @@ static void parse_config_file(char *config) {
         node->next = sync_info_mem_store;
         sync_info_mem_store = node;
 	}
+	fclose(fp);
 }
 
 void *worker_thread(void *arg) {
@@ -305,7 +306,7 @@ void *worker_thread(void *arg) {
 
 		char no_more_data_to_push[200];
 		snprintf(no_more_data_to_push, sizeof(no_more_data_to_push), "PUSH %s/%s 0\n", curr_task.target_dir, curr_task.filename);
-		send(target_socket, no_more_data_to_push, sizeof(no_more_data_to_push), 0);
+		send(target_socket, no_more_data_to_push, strlen(no_more_data_to_push), 0);
 		snprintf(detail_to_log, sizeof(detail_to_log), "%lld bytes pushed", data_sent);
 		log_sync_result(curr_task, "PUSH", "SUCCESS", detail_to_log);
 
@@ -725,6 +726,15 @@ int main(int argc, char *argv[]) {
 				send(connection_fd, response, strlen(response), 0);
 				
 				send(connection_fd, "END\n", 4, 0);
+
+				// Free sync info nodes
+				SyncInfo *curr = sync_info_mem_store;
+				while (curr != NULL) {
+					SyncInfo *next = curr->next;
+					free(curr);
+					curr = next;
+				}
+				sync_info_mem_store = NULL;
 
 				free(worker_threads);
 				free(task_buffer);
