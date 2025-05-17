@@ -682,6 +682,25 @@ int main(int argc, char *argv[]) {
 			}
 			else if (strcmp(command_read, "shutdown") == 0) {
 
+				char response[600];
+				time_t now = time(NULL);
+				struct tm *t = localtime(&now);
+				snprintf(response, sizeof(response),
+					"[%04d-%02d-%02d %02d:%02d:%02d] Shutting down manager...\n",
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+
+				send(connection_fd, response, strlen(response), 0);
+
+
+				t = localtime(&now);
+				snprintf(response, sizeof(response),
+					"[%04d-%02d-%02d %02d:%02d:%02d] Waiting for all active workers to finish.\n"
+					"[%04d-%02d-%02d %02d:%02d:%02d] Processing remaining queued tasks.\n",
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+
+				send(connection_fd, response, strlen(response), 0);
+
 				pthread_mutex_lock(&task_done_mutex);
 				while (completed_tasks < total_tasks) {
 					pthread_cond_wait(&all_tasks_done, &task_done_mutex);
@@ -698,20 +717,13 @@ int main(int argc, char *argv[]) {
 					pthread_join(worker_threads[i], NULL);
 				}
 
-				time_t now = time(NULL);
-				struct tm *t = localtime(&now);
-				char response[600];
+				t = localtime(&now);
 				snprintf(response, sizeof(response),
-					"[%04d-%02d-%02d %02d:%02d:%02d] Shutting down manager...\n"
-					"[%04d-%02d-%02d %02d:%02d:%02d] Waiting for all active workers to finish.\n"
-					"[%04d-%02d-%02d %02d:%02d:%02d] Processing remaining queued tasks.\n"
 					"[%04d-%02d-%02d %02d:%02d:%02d] Manager shutdown complete\n",
-					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
-					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
-					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
 					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
 
 				send(connection_fd, response, strlen(response), 0);
+				
 				send(connection_fd, "END\n", 4, 0);
 
 				free(worker_threads);
