@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+
 static void log_command(const char *command_line, const char*console_logfile) {
     FILE *fp = fopen(console_logfile, "a");
     if (!fp) return;
@@ -51,41 +52,41 @@ int main(int argc, char *argv[]) {
     FILE *clear = fopen(console_logfile, "w");
     if (clear) fclose(clear);
 
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr_in serveraddr;
+    memset(&serveraddr, 0, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, host_ip, &serveraddr.sin_addr) <= 0) {
+        fprintf(stderr, "Incorrect IP: %s\n", host_ip);
+        exit(EXIT_FAILURE);
+    }
+
+    if (connect(sockfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) {
+        perror("connect");
+        exit(EXIT_FAILURE);
+    }
+
+	char command_to_send[1000], response[2000];
+
 
 	while(1) {
-		char command_to_send[1000];
 		printf("> ");
 		if(!fgets(command_to_send, sizeof(command_to_send), stdin)) {
 			fprintf(stderr, "Error reading command\n");
 			exit(EXIT_FAILURE);
 		}
-		command_to_send[strcspn(command_to_send, "\n")] = 0;
+		command_to_send[strcspn(command_to_send, "\n")] ='\0';
 
 		if (strlen(command_to_send) == 0) continue;
 
 		log_command(command_to_send, console_logfile);
-
-		int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-		if(sockfd < 0) {
-			perror("socket");
-			continue;
-		}
-
-		struct sockaddr_in serveraddr;
-		memset(&serveraddr, 0, sizeof(serveraddr));
-		serveraddr.sin_family = AF_INET;
-		serveraddr.sin_port = htons(port);
-
-		// Convert IP string (e.g., "127.0.0.1") to binary
-		if(inet_pton(AF_INET, host_ip, &serveraddr.sin_addr) <= 0) {
-			fprintf(stderr, "Incorrect IP: %s\n", host_ip);
-			continue;
-		}
-
-		if(connect(sockfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0) {
-			perror("connect");
-			continue;
-		}
 		
 		if(send(sockfd, command_to_send, strlen(command_to_send), 0) < 0) {
 			perror("send");
@@ -93,19 +94,32 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 
-		char response[1000];
-		ssize_t received_bytes = recv(sockfd, response, sizeof(response) - 1, 0);
-		if(received_bytes > 0) {
-			response[received_bytes] = '\0';
-			printf("%s", response);
-		}
 
-		close(sockfd);
+		char found_end = 0;
+		while (!found_end) {
+			ssize_t bytes_received = recv(sockfd, response, sizeof(response) - 1, 0);
+			if (bytes_received <= 0) {
+				perror("recv");
+				break;
+			}
+
+			response[bytes_received] = '\0';
+
+			char *end_marker = strstr(response, "END\n");
+			if (end_marker) {
+				*end_marker = '\0';  // Truncate before END
+				found_end = 1;
+			}
+
+			printf("%s", response);
+			fflush(stdout);
+		}
 
 		if (!strcmp(command_to_send, "shutdown")) {
             break;
         }
 	}
 
+	close(sockfd);
 	return 0;
 }

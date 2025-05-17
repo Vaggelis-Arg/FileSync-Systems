@@ -521,188 +521,211 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	char command_read[300];
-	ssize_t bytes_read;
-	if ((bytes_read = read(connection_fd, command_read, sizeof(command_read) - 1)) > 0) {
-		command_read[bytes_read] = '\0';
+	while(1) {
+		char command_read[300];
+		ssize_t bytes_read;
+		if ((bytes_read = read(connection_fd, command_read, sizeof(command_read) - 1)) > 0) {
+			command_read[bytes_read] = '\0';
 
-		// Remove trailing newline
-		command_read[strcspn(command_read, "\r\n")] = '\0';
+			// Remove trailing newline
+			command_read[strcspn(command_read, "\r\n")] = '\0';
 
-		if (strcmp(command_read, "shutdown") == 0) {
-
-			pthread_mutex_lock(&task_done_mutex);
-			while (completed_tasks < total_tasks) {
-				pthread_cond_wait(&all_tasks_done, &task_done_mutex);
-			}
-			pthread_mutex_unlock(&task_done_mutex);
-
-			shutting_down = 1;
-
-			// Wake all waiting worker threads
-			pthread_cond_broadcast(&not_empty);
-
-			for (int i = 0; i < worker_limit; i++) {
-				pthread_cancel(worker_threads[i]); // terminates infinite-loop threads
-				pthread_join(worker_threads[i], NULL);
-			}
-
-			time_t now = time(NULL);
-			struct tm *t = localtime(&now);
-			char response[600];
-			snprintf(response, sizeof(response),
-				"[%04d-%02d-%02d %02d:%02d:%02d] Shutting down manager...\n"
-				"[%04d-%02d-%02d %02d:%02d:%02d] Waiting for all active workers to finish.\n"
-				"[%04d-%02d-%02d %02d:%02d:%02d] Processing remaining queued tasks.\n"
-				"[%04d-%02d-%02d %02d:%02d:%02d] Manager shutdown complete\n",
-				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
-				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
-				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
-				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
-
-			send(connection_fd, response, strlen(response), 0);
-
-			free(worker_threads);
-			free(task_buffer);
-			close(server_fd);
-			close(connection_fd);
-
-			exit(EXIT_SUCCESS);
-		}
-		else if (strncmp(command_read, "add ", 4) == 0) {
-			char src[100], target[100];
-			if (sscanf(command_read + 4, "%s %s", src, target) != 2) {
-				const char *resp = "Incorrect add command\n";
-				send(connection_fd, resp, strlen(resp), 0);
-			}
-
-			SyncInfo *node = malloc(sizeof(*node));
-			if (!node) {
-				send(connection_fd, "Error in memory allocation\n", 26, 0);
-			}
-
-			char *src_path_end = strchr(src, '@');
-			if (!src_path_end) {
-				send(connection_fd, "Invalid source format\n", 23, 0);
-				free(node);
-			}
-			*src_path_end = '\0';
-			int already_exists = 0;
-			SyncInfo *curr = sync_info_mem_store;
-			while (curr != NULL) {
-				if (strcmp(src, curr->source_dir) == 0) {
-					already_exists = 1;
-					free(node);
-					break;
+			if (strncmp(command_read, "add ", 4) == 0) {
+				char src[100], target[100];
+				if (sscanf(command_read + 4, "%s %s", src, target) != 2) {
+					const char *resp = "Incorrect add command\n";
+					send(connection_fd, resp, strlen(resp), 0);
+					send(connection_fd, "END\n", 4, 0);
+					continue;
 				}
-				curr = curr->next;
-			}
 
-			if (already_exists) {
+				SyncInfo *node = malloc(sizeof(*node));
+				if (!node) {
+					send(connection_fd, "Error in memory allocation\n", 26, 0);
+					send(connection_fd, "END\n", 4, 0);
+					continue;
+				}
+
+				char *src_path_end = strchr(src, '@');
+				if (!src_path_end) {
+					send(connection_fd, "Invalid source format\n", 23, 0);
+					send(connection_fd, "END\n", 4, 0);
+					free(node);
+					continue;
+				}
+				*src_path_end = '\0';
+				int already_exists = 0;
+				SyncInfo *curr = sync_info_mem_store;
+				while (curr != NULL) {
+					if (strcmp(src, curr->source_dir) == 0) {
+						already_exists = 1;
+						free(node);
+						break;
+					}
+					curr = curr->next;
+				}
+
+				if (already_exists) {
+					time_t now = time(NULL);
+					struct tm *t = localtime(&now);
+					char response[400];
+					snprintf(response, sizeof(response), 
+							"[%04d-%02d-%02d %02d:%02d:%02d] Already in queue: %s\n",
+							t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+							t->tm_hour, t->tm_min, t->tm_sec,
+							src);
+					send(connection_fd, response, strlen(response), 0);
+					send(connection_fd, "END\n", 4, 0);
+					continue;
+				}
+
+				strncpy(node->source_dir, src, sizeof(node->source_dir));
+
+				char *src_host_end = strchr(src_path_end + 1, ':');
+				if (!src_host_end) {
+					send(connection_fd, "Invalid source format\n", 23, 0);
+					send(connection_fd, "END\n", 4, 0);
+					free(node);
+					continue;
+				}
+				*src_host_end = '\0';
+				strncpy(node->source_host, src_path_end + 1, sizeof(node->source_host));
+				node->source_port = atoi(src_host_end + 1);
+
+				char *target_path_end = strchr(target, '@');
+				if (!target_path_end) {
+					send(connection_fd, "Invalid target format\n", 23, 0);
+					send(connection_fd, "END\n", 4, 0);
+					free(node);
+					continue;
+				}
+				*target_path_end = '\0';
+				strncpy(node->target_dir, target, sizeof(node->target_dir));
+
+				struct stat st = {0};
+				if (stat(node->target_dir, &st) == -1) {
+					if (mkdir(node->target_dir, 0755) < 0) {
+						perror("mkdir");
+						send(connection_fd, "Failed to create target directory\n", 34, 0);
+						send(connection_fd, "END\n", 4, 0);
+						free(node);
+						close(connection_fd);
+						continue;
+					}
+				}
+
+				char *target_host_end = strchr(target_path_end + 1, ':');
+				if (!target_host_end) {
+					send(connection_fd, "Invalid target format\n", 23, 0);
+					send(connection_fd, "END\n", 4, 0);
+					free(node);
+					continue;
+				}
+				*target_host_end = '\0';
+				strncpy(node->target_host, target_path_end + 1, sizeof(node->target_host));
+				node->target_port = atoi(target_host_end + 1);
+
+				node->active = 1;
+				node->last_sync = 0;
+				node->error_count = 0;
+
+				// Add to front of sync_info_mem_store list
+				node->next = sync_info_mem_store;
+				sync_info_mem_store = node;
+
+				// sync current pair
+				sync_pair_files(node, connection_fd);
+
+				send(connection_fd, "END\n", 4, 0);
+			}
+			else if (strncmp(command_read, "cancel ", 7) == 0) {
+				char src_dir[100];
+
+				if (sscanf(command_read + 7, "%s", src_dir) != 1) {
+					const char *resp = "Incorrect cancel command format.\n";
+					send(connection_fd, resp, strlen(resp), 0);
+					send(connection_fd, "END\n", 4, 0);
+					close(connection_fd);
+					continue;
+				}
+
+				int cancelled = 0;
+				SyncInfo *curr = sync_info_mem_store;
+				while (curr != NULL) {
+					if (!strcmp(curr->source_dir, src_dir)) {
+						curr->active = 0;
+						cancelled = 1;
+						break;
+					}
+					curr = curr->next;
+				}
+
+				char response[400];
+				if (cancelled) {
+					time_t now = time(NULL);
+					struct tm *t = localtime(&now);
+					sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Synchronization stopped for %s@%s:%d\n",
+							t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+							t->tm_hour, t->tm_min, t->tm_sec,
+							src_dir, curr->source_host, curr->source_port);
+				} else {
+					time_t now = time(NULL);
+					struct tm *t = localtime(&now);
+					sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Directory not being synchronized: %s\n",
+							t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+							t->tm_hour, t->tm_min, t->tm_sec,
+							src_dir);
+				}
+				send(connection_fd, response, strlen(response), 0);
+				send(connection_fd, "END\n", 4, 0);
+
+			}
+			else if (strcmp(command_read, "shutdown") == 0) {
+
+				pthread_mutex_lock(&task_done_mutex);
+				while (completed_tasks < total_tasks) {
+					pthread_cond_wait(&all_tasks_done, &task_done_mutex);
+				}
+				pthread_mutex_unlock(&task_done_mutex);
+
+				shutting_down = 1;
+
+				// Wake all waiting worker threads
+				pthread_cond_broadcast(&not_empty);
+
+				for (int i = 0; i < worker_limit; i++) {
+					pthread_cancel(worker_threads[i]); // terminates infinite-loop threads
+					pthread_join(worker_threads[i], NULL);
+				}
+
 				time_t now = time(NULL);
 				struct tm *t = localtime(&now);
-				char response[400];
-				snprintf(response, sizeof(response), 
-						"[%04d-%02d-%02d %02d:%02d:%02d] Already in queue: %s\n",
-						t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-						t->tm_hour, t->tm_min, t->tm_sec,
-						src);
+				char response[600];
+				snprintf(response, sizeof(response),
+					"[%04d-%02d-%02d %02d:%02d:%02d] Shutting down manager...\n"
+					"[%04d-%02d-%02d %02d:%02d:%02d] Waiting for all active workers to finish.\n"
+					"[%04d-%02d-%02d %02d:%02d:%02d] Processing remaining queued tasks.\n"
+					"[%04d-%02d-%02d %02d:%02d:%02d] Manager shutdown complete\n",
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+					t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+
 				send(connection_fd, response, strlen(response), 0);
+				send(connection_fd, "END\n", 4, 0);
+
+				free(worker_threads);
+				free(task_buffer);
+				close(server_fd);
+				close(connection_fd);
+
 				return 0;
 			}
-
-			strncpy(node->source_dir, src, sizeof(node->source_dir));
-
-			char *src_host_end = strchr(src_path_end + 1, ':');
-			if (!src_host_end) {
-				send(connection_fd, "Invalid source format\n", 23, 0);
-				free(node);
+			else {
+				const char *response = "Unknown command\n";
+				send(connection_fd, response, strlen(response), 0);
+				send(connection_fd, "END\n", 4, 0);
 			}
-			*src_host_end = '\0';
-			strncpy(node->source_host, src_path_end + 1, sizeof(node->source_host));
-			node->source_port = atoi(src_host_end + 1);
-
-			char *target_path_end = strchr(target, '@');
-			if (!target_path_end) {
-				send(connection_fd, "Invalid target format\n", 23, 0);
-				free(node);
-			}
-			*target_path_end = '\0';
-			strncpy(node->target_dir, target, sizeof(node->target_dir));
-
-			struct stat st = {0};
-			if (stat(node->target_dir, &st) == -1) {
-				if (mkdir(node->target_dir, 0755) < 0) {
-					perror("mkdir");
-					send(connection_fd, "Failed to create target directory\n", 34, 0);
-					free(node);
-					close(connection_fd);
-					return 0;
-				}
-			}
-
-			char *target_host_end = strchr(target_path_end + 1, ':');
-			if (!target_host_end) {
-				send(connection_fd, "Invalid target format\n", 23, 0);
-				free(node);
-			}
-			*target_host_end = '\0';
-			strncpy(node->target_host, target_path_end + 1, sizeof(node->target_host));
-			node->target_port = atoi(target_host_end + 1);
-
-			node->active = 1;
-			node->last_sync = 0;
-			node->error_count = 0;
-
-			// Add to front of sync_info_mem_store list
-			node->next = sync_info_mem_store;
-			sync_info_mem_store = node;
-
-			// sync current pair
-			sync_pair_files(node, connection_fd);
-		}
-		else if (strncmp(command_read, "cancel ", 7) == 0) {
-			char src_dir[100];
-
-			if (sscanf(command_read + 7, "%s", src_dir) != 1) {
-				const char *resp = "Incorrect cancel command format.\n";
-				send(connection_fd, resp, strlen(resp), 0);
-				close(connection_fd);
-			}
-
-			int cancelled = 0;
-			SyncInfo *curr = sync_info_mem_store;
-			while (curr != NULL) {
-				if (!strcmp(curr->source_dir, src_dir)) {
-					curr->active = 0;
-					cancelled = 1;
-					break;
-				}
-				curr = curr->next;
-			}
-
-			char response[400];
-			if (cancelled) {
-				time_t now = time(NULL);
-				struct tm *t = localtime(&now);
-				sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Synchronization stopped for %s@%s:%d\n",
-						t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-						t->tm_hour, t->tm_min, t->tm_sec,
-						src_dir, curr->source_host, curr->source_port);
-			} else {
-				time_t now = time(NULL);
-				struct tm *t = localtime(&now);
-				sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Directory not being synchronized: %s\n",
-						t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-						t->tm_hour, t->tm_min, t->tm_sec,
-						src_dir);
-			}
-			send(connection_fd, response, strlen(response), 0);
-
-		}
-		else {
-			const char *response = "Unknown command\n";
-			send(connection_fd, response, strlen(response), 0);
 		}
 	}
 
