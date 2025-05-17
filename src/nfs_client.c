@@ -153,7 +153,6 @@ int main(int argc, char *argv[]) {
     }
 
     listen(listenfd, 10);
-    printf("nfs_client listening on port %d...\n", port);
 
     while (1) {
         len = sizeof(cliaddr);

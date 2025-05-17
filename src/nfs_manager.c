@@ -514,7 +514,6 @@ int main(int argc, char *argv[]) {
 	}
 
 	listen(server_fd, 5);
-	printf("nfs_manager listening for console commands on port %d...\n", port_number);
 
 	connection_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
 	if(connection_fd < 0) {

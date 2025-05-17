@@ -5,9 +5,6 @@ SRC_DIR := src
 CONFIG_DIR := config
 CONFIG_FILE := $(CONFIG_DIR)/config.txt
 
-CLIENT1_DIR := client1_dir
-CLIENT2_DIR := client2_dir
-
 MANAGER := nfs_manager
 CLIENT := nfs_client
 CONSOLE := nfs_console
@@ -40,7 +37,6 @@ $(CONSOLE): $(CONSOLE_SRC)
 .PHONY: clean
 clean:
 	@rm -f $(MANAGER) $(CLIENT) $(CONSOLE) $(MANAGER_LOG) $(CONSOLE_LOG)
-	@rm -f $(CLIENT2_DIR)/*.txt
 
 # === HELP TARGET ===
 .PHONY: help
