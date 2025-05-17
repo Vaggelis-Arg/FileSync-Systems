@@ -323,7 +323,7 @@ void *worker_thread(void *arg) {
 	return NULL;
 }
 
-void sync_pair_files(SyncInfo *curr) {
+void sync_pair_files(SyncInfo *curr, int connection_fd) { // I pass not only the sync info node but also the socket descriptor for communication with console
 	if (!curr->active)
 		return;
 	
@@ -404,12 +404,18 @@ void sync_pair_files(SyncInfo *curr) {
 		}
 		time_t now = time(NULL);
 		struct tm *t = localtime(&now);
-		fprintf(fp, "[%04d-%02d-%02d %02d:%02d:%02d] Added file: %s/%s@%s:%d -> %s/%s@%s:%d\n",
+		char response[500];
+		sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Added file: %s/%s@%s:%d -> %s/%s@%s:%d\n",
 				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
 				t->tm_hour, t->tm_min, t->tm_sec,
 				curr_task.source_dir, curr_task.filename, curr_task.source_host, curr_task.source_port,
 				curr_task.target_dir, curr_task.filename, curr_task.target_host, curr_task.target_port);
+
+		fprintf(fp, "%s", response);
+		
 		fclose(fp);
+		if(connection_fd != -1)
+			send(connection_fd, response, strlen(response), 0);
 	}
 }
 
@@ -479,7 +485,7 @@ int main(int argc, char *argv[]) {
 	// FULL sync all the files in sync_info_mem_store (currently all files we parsed from the config file)
 	SyncInfo *curr = sync_info_mem_store;
 	while (curr) {
-		sync_pair_files(curr);
+		sync_pair_files(curr, -1);
 		curr = curr->next;
 	}
 
@@ -523,11 +529,7 @@ int main(int argc, char *argv[]) {
 		// Remove trailing newline
 		command_read[strcspn(command_read, "\r\n")] = '\0';
 
-		printf("Command received: %s\n", command_read);
-
 		if (strcmp(command_read, "shutdown") == 0) {
-			const char *response = "Shutting down manager...\n";
-			send(connection_fd, response, strlen(response), 0);
 
 			pthread_mutex_lock(&task_done_mutex);
 			while (completed_tasks < total_tasks) {
@@ -545,12 +547,26 @@ int main(int argc, char *argv[]) {
 				pthread_join(worker_threads[i], NULL);
 			}
 
+			time_t now = time(NULL);
+			struct tm *t = localtime(&now);
+			char response[600];
+			snprintf(response, sizeof(response),
+				"[%04d-%02d-%02d %02d:%02d:%02d] Shutting down manager...\n"
+				"[%04d-%02d-%02d %02d:%02d:%02d] Waiting for all active workers to finish.\n"
+				"[%04d-%02d-%02d %02d:%02d:%02d] Processing remaining queued tasks.\n"
+				"[%04d-%02d-%02d %02d:%02d:%02d] Manager shutdown complete\n",
+				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+
+			send(connection_fd, response, strlen(response), 0);
+
 			free(worker_threads);
 			free(task_buffer);
 			close(server_fd);
 			close(connection_fd);
 
-			printf("Shutdown complete.\n");
 			exit(EXIT_SUCCESS);
 		}
 		else if (strncmp(command_read, "add ", 4) == 0) {
@@ -571,6 +587,30 @@ int main(int argc, char *argv[]) {
 				free(node);
 			}
 			*src_path_end = '\0';
+			int already_exists = 0;
+			SyncInfo *curr = sync_info_mem_store;
+			while (curr != NULL) {
+				if (strcmp(src, curr->source_dir) == 0) {
+					already_exists = 1;
+					free(node);
+					break;
+				}
+				curr = curr->next;
+			}
+
+			if (already_exists) {
+				time_t now = time(NULL);
+				struct tm *t = localtime(&now);
+				char response[400];
+				snprintf(response, sizeof(response), 
+						"[%04d-%02d-%02d %02d:%02d:%02d] Already in queue: %s\n",
+						t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+						t->tm_hour, t->tm_min, t->tm_sec,
+						src);
+				send(connection_fd, response, strlen(response), 0);
+				return 0;
+			}
+
 			strncpy(node->source_dir, src, sizeof(node->source_dir));
 
 			char *src_host_end = strchr(src_path_end + 1, ':');
@@ -619,10 +659,7 @@ int main(int argc, char *argv[]) {
 			sync_info_mem_store = node;
 
 			// sync current pair
-			sync_pair_files(node);
-
-			const char *resp = "New sync pair added\n";
-			send(connection_fd, resp, strlen(resp), 0);
+			sync_pair_files(node, connection_fd);
 		}
 		else if (strncmp(command_read, "cancel ", 7) == 0) {
 			char src_dir[100];
@@ -644,13 +681,24 @@ int main(int argc, char *argv[]) {
 				curr = curr->next;
 			}
 
+			char response[400];
 			if (cancelled) {
-				send(connection_fd, "Sync canceled successfully.\n", 29, 0);
+				time_t now = time(NULL);
+				struct tm *t = localtime(&now);
+				sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Synchronization stopped for %s@%s:%d\n",
+						t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+						t->tm_hour, t->tm_min, t->tm_sec,
+						src_dir, curr->source_host, curr->source_port);
 			} else {
-				send(connection_fd, "No matching sync found.\n", 25, 0);
+				time_t now = time(NULL);
+				struct tm *t = localtime(&now);
+				sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Directory not being synchronized: %s\n",
+						t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+						t->tm_hour, t->tm_min, t->tm_sec,
+						src_dir);
 			}
+			send(connection_fd, response, strlen(response), 0);
 
-			close(connection_fd);
 		}
 		else {
 			const char *response = "Unknown command\n";

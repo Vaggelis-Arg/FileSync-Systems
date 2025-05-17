@@ -20,7 +20,7 @@ MANAGER_LOG := manager.log
 CONSOLE_LOG := console.log
 
 CC := gcc
-CFLAGS := -pthread -O2
+CFLAGS := -Werror -pthread -O2
 
 # === DEFAULT TARGET ===
 .PHONY: all
