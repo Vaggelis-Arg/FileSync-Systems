@@ -96,12 +96,15 @@ static void handle_push(int connfd, char *line) {
 	}
 }
 
-static void handle_connection(int connfd) {
+static void *handle_connection(void *arg) { // pthread required "void *function(void *arg)" function type
+	int connfd = *(int *)arg;
+	free(arg);  // Free the dynamically allocated memory in heap
+
 	char line[200];
 	FILE *fp = fdopen(connfd, "r+");
 	if(fp == NULL) {
 		fprintf(stderr, "Failed to open connection file descriptor\n");
-		return;
+		return NULL;
 	}
 
 	while(fgets(line, sizeof(line), fp)) {
@@ -156,15 +159,25 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         len = sizeof(cliaddr);
-        connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &len);
-        if (connfd < 0) {
-            perror("accept");
-            continue;
-        }
+        int *connfd_ptr = malloc(sizeof(int));
+		*connfd_ptr = accept(listenfd, (struct sockaddr *)&cliaddr, &len);
+		if (*connfd_ptr < 0) {
+			perror("accept");
+			free(connfd_ptr);
+			continue;
+		}
 
-        handle_connection(connfd);
-        close(connfd);
+		pthread_t thread_id;
+		if (pthread_create(&thread_id, NULL, handle_connection, connfd_ptr) != 0) {
+			perror("pthread_create");
+			close(*connfd_ptr);
+			free(connfd_ptr);
+		} else {
+			pthread_detach(thread_id);
+		}
     }
+
+	close(listenfd);
 
     return 0;
 }
