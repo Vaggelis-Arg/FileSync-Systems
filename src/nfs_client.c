@@ -64,36 +64,73 @@ static void handle_pull(int connfd, char *filepath) {
 	close(fd);
 }
 
-static void handle_push(int connfd, char *line) {
-	char command[8], filepath[128];
+static void handle_push(int connfd, char *line, FILE **out_fp) {
+    char command[8], filepath[128];
     int chunk_size;
-    sscanf(line, "%s %s %d", command, filepath, &chunk_size);
 
-	static FILE *fp = NULL;
+    // Parse only the command and file path and chunk size
+    if (sscanf(line, "%s %s %d", command, filepath, &chunk_size) != 3) {
+        fprintf(stderr, "Invalid PUSH command format\n");
+        return;
+    }
 
-	if(chunk_size == -1) {
-		fp = fopen(filepath, "w");
-		if(fp == NULL) {
-			fprintf(stderr, "Could not open file %s for \'w\'\n", filepath);
-		}
-		return;
-	}
-	else if (chunk_size == 0) {
-		if(fp != NULL) {
-			fclose(fp);
-			fp = NULL;
-		}
-		return;
-	}
-	else {
-		char *data = strchr(line, ' '); // parse until PUSH command
-        data = strchr(data + 1, ' '); // parse until the file path
-        data = strchr(data + 1, ' '); // parse until the chunk size
-        if (fp && data) {
-			fwrite(data + 1, 1, chunk_size, fp); // write the data (what's left) in the file
-			fflush(fp);
-		}
-	}
+    if (chunk_size == -1) {
+        *out_fp = fopen(filepath, "w");
+        if (*out_fp == NULL) {
+            fprintf(stderr, "Could not open file %s for writing\n", filepath);
+        }
+        return;
+    } else if (chunk_size == 0) {
+        if (*out_fp != NULL) {
+            fclose(*out_fp);
+            *out_fp = NULL;
+        }
+        return;
+    }
+
+    // Find where the actual binary data starts in `line`
+    char *start_data = strchr(line, '\n');
+    int header_len = (start_data != NULL) ? (start_data - line + 1) : strlen(line);
+
+    int remaining = chunk_size;
+
+    // If some of the binary data was already read in `line`, write it now
+    if (start_data && *(start_data + 1) != '\0') {
+        int pre_read_bytes = strlen(start_data + 1);
+        fwrite(start_data + 1, 1, pre_read_bytes, *out_fp);
+        remaining -= pre_read_bytes;
+    }
+
+    // Read the remaining bytes from the socket
+    while (remaining > 0) {
+        char buf[1024];
+        int to_read = (remaining < sizeof(buf)) ? remaining : sizeof(buf);
+        int bytes_read = recv(connfd, buf, to_read, MSG_WAITALL);
+        if (bytes_read <= 0) {
+            fprintf(stderr, "Unexpected end of stream during PUSH\n");
+            break;
+        }
+
+        fwrite(buf, 1, bytes_read, *out_fp);
+        fflush(*out_fp);
+        remaining -= bytes_read;
+    }
+}
+
+
+
+ssize_t read_line_from_socket(int sockfd, char *buf, size_t max_len) {
+    size_t total_read = 0;
+    while (total_read < max_len - 1) {
+        char c;
+        ssize_t n = recv(sockfd, &c, 1, 0);
+        if (n <= 0) break;
+
+        buf[total_read++] = c;
+        if (c == '\n') break;
+    }
+    buf[total_read] = '\0';
+    return total_read;
 }
 
 static void *handle_connection(void *arg) { // pthread required "void *function(void *arg)" function type
@@ -101,28 +138,31 @@ static void *handle_connection(void *arg) { // pthread required "void *function(
 	free(arg);  // Free the dynamically allocated memory in heap
 
 	char line[200];
-	FILE *fp = fdopen(connfd, "r+");
-	if(fp == NULL) {
-		fprintf(stderr, "Failed to open connection file descriptor\n");
-		return NULL;
-	}
 
-	while(fgets(line, sizeof(line), fp)) {
+	FILE *out_fp = NULL;
+
+	while (1) {
+		char line[200];
+		ssize_t n = read_line_from_socket(connfd, line, sizeof(line));
+		if (n <= 0) break;
+
 		char command[20], arg1[100];
-
 		sscanf(line, "%s %s", command, arg1);
 
-		if(!strcmp(command, "LIST")) {
+		if (!strcmp(command, "LIST")) {
 			handle_list(connfd, arg1);
 		}
-		else if(!strcmp(command, "PULL")) {
+		else if (!strcmp(command, "PULL")) {
 			handle_pull(connfd, arg1);
 		}
-		else if(!strcmp(command, "PUSH")) {
-			handle_push(connfd, line);
+		else if (!strcmp(command, "PUSH")) {
+			handle_push(connfd, line, &out_fp);
 		}
 	}
-	fclose(fp);
+
+	if (out_fp != NULL) fclose(out_fp);
+	close(connfd);
+	return NULL;
 }
 
 

@@ -82,10 +82,11 @@ static void clean_logfile(const char *logfile) {
 }
 
 
+// Producer
 void enqueue_task(SyncTask task) {
 	pthread_mutex_lock(&buffer_mutex); // lock the buffer mutex (no other thread can operate in buffer until current thread finishes)
 	while(buffer_count >= buffer_size) {
-		pthread_cond_wait(&not_full, &buffer_mutex);
+		pthread_cond_wait(&not_full, &buffer_mutex); // Wait until space is available in buffer
 	}
 	task_buffer[buffer_tail] = task;
 	buffer_tail = (buffer_tail + 1) % buffer_size;
@@ -97,21 +98,22 @@ void enqueue_task(SyncTask task) {
 	pthread_mutex_unlock(&buffer_mutex); // I finished, next thread can now operate in the task queue
 }
 
+// Consumer
 SyncTask dequeue_task() {
-	pthread_mutex_lock(&buffer_mutex);
+	pthread_mutex_lock(&buffer_mutex); // lock buffer for exclusive access
 	while(buffer_count <= 0) {
 		if (shutting_down) {
 			pthread_mutex_unlock(&buffer_mutex);
 			pthread_exit(NULL);  // exit the thread if we're shutting down
 		}
-		pthread_cond_wait(&not_empty, &buffer_mutex);
+		pthread_cond_wait(&not_empty, &buffer_mutex); // wait until buffer is not empty
 	}
 	SyncTask task = task_buffer[buffer_head];
 	buffer_head = (buffer_head + 1) % buffer_size;
 	buffer_count--;
 
-	pthread_cond_signal(&not_full); // I just removed a task from the queue so it is definitely not full. If it was and a thread could not enqueue a task, now it can
-	pthread_mutex_unlock(&buffer_mutex);
+	pthread_cond_signal(&not_full); // I just removed a task from the queue so it is definitely not full. Signal the producer thread that there is space now
+	pthread_mutex_unlock(&buffer_mutex); // unlock buffer
 	return task;
 }
 
@@ -297,10 +299,13 @@ void *worker_thread(void *arg) {
 		long long data_sent = 0;
 		while(data_sent < filesize) {
 			unsigned int chunk_size = (filesize - data_sent < 1024) ? filesize - data_sent : 1024; // we use 1 KB as the default chuck size to load
-			char push_command[200];
-			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d ", curr_task.target_dir, curr_task.filename, chunk_size);
-			send(target_socket, push_command, strlen(push_command), 0); // send push command to the client
-			send(target_socket, file_data + data_sent, chunk_size, 0); // send the current chunk of data
+			char push_command[2000];
+			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d\n", curr_task.target_dir, curr_task.filename, chunk_size);
+			char *full_message = malloc(strlen(push_command) + chunk_size);
+			memcpy(full_message, push_command, strlen(push_command));
+			memcpy(full_message + strlen(push_command), file_data + data_sent, chunk_size);
+			send(target_socket, full_message, strlen(push_command) + chunk_size, 0);
+			free(full_message);
 			data_sent += chunk_size;
 		}
 
@@ -317,7 +322,7 @@ void *worker_thread(void *arg) {
 		pthread_mutex_lock(&task_done_mutex);
 		completed_tasks++;
 		if (completed_tasks == total_tasks) {
-			pthread_cond_signal(&all_tasks_done);  // Wake up the main thread
+			pthread_cond_signal(&all_tasks_done);  // Notify main thread that all tasks in the queue are done
 		}
 		pthread_mutex_unlock(&task_done_mutex);
 	}
@@ -702,7 +707,7 @@ int main(int argc, char *argv[]) {
 				send(connection_fd, response, strlen(response), 0);
 
 				pthread_mutex_lock(&task_done_mutex);
-				while (completed_tasks < total_tasks) {
+				while (completed_tasks < total_tasks) { // wait for all the tasks to finish
 					pthread_cond_wait(&all_tasks_done, &task_done_mutex);
 				}
 				pthread_mutex_unlock(&task_done_mutex);
