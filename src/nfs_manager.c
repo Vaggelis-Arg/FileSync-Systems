@@ -563,20 +563,22 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	int optval = 1;
-	setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+	int optval = 1; // flag to activate reuse option for tthe manager's socket
+	setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)); // reuse server socket address (server_fd) no matter if it is occupied (avoid TIME_WAIT)
 
 	memset(&server_addr, 0, sizeof(server_addr));
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = INADDR_ANY;
+	server_addr.sin_family = AF_INET; // adress in IPv4
+	server_addr.sin_addr.s_addr = INADDR_ANY; // listen to all ports
 	server_addr.sin_port = htons(port_number);
 
+	// bind manager socket with the local adress
 	if(bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
 		perror("bind");
 		exit(EXIT_FAILURE);
 	}
 
-	listen(server_fd, 5);
+	// listen for maximum "worker_limit" connections at the same time
+	listen(server_fd, worker_limit);
 
 	connection_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
 	if(connection_fd < 0) {
@@ -591,7 +593,7 @@ int main(int argc, char *argv[]) {
 			command_read[bytes_read] = '\0';
 
 			// Remove trailing newline
-			command_read[strcspn(command_read, "\r\n")] = '\0';
+			command_read[strcspn(command_read, "\r\n")] = '\0'; // remove \r and \n
 
 			if (strncmp(command_read, "add ", 4) == 0) {
 				char src[100], target[100];
@@ -609,6 +611,8 @@ int main(int argc, char *argv[]) {
 					continue;
 				}
 
+				// parse source dir, host and port
+
 				char *src_path_end = strchr(src, '@');
 				if (!src_path_end) {
 					send(connection_fd, "Invalid source format\n", 23, 0);
@@ -617,6 +621,8 @@ int main(int argc, char *argv[]) {
 					continue;
 				}
 				*src_path_end = '\0';
+
+				// Check if requested directory is already synchronized
 				int already_exists = 0;
 				SyncInfo *curr = sync_info_mem_store;
 				while (curr != NULL) {
@@ -654,6 +660,8 @@ int main(int argc, char *argv[]) {
 				*src_host_end = '\0';
 				strncpy(node->source_host, src_path_end + 1, sizeof(node->source_host));
 				node->source_port = atoi(src_host_end + 1);
+
+				// parse target dir, host and port
 
 				char *target_path_end = strchr(target, '@');
 				if (!target_path_end) {
@@ -712,6 +720,7 @@ int main(int argc, char *argv[]) {
 					continue;
 				}
 
+				// Find the given dir in sync_info_mem_store list
 				int cancelled = 0;
 				SyncInfo *curr = sync_info_mem_store;
 				while (curr != NULL) {
@@ -723,6 +732,7 @@ int main(int argc, char *argv[]) {
 					curr = curr->next;
 				}
 
+				// Print corresponding message depending whether we found the dir or not in the sync_info_mem_store
 				char response[400];
 				if (cancelled) {
 					time_t now = time(NULL);
@@ -755,6 +765,7 @@ int main(int argc, char *argv[]) {
 				send(connection_fd, response, strlen(response), 0);
 
 
+				// The worker threads should process all remaining tasks in the queue and join
 				t = localtime(&now);
 				snprintf(response, sizeof(response),
 					"[%04d-%02d-%02d %02d:%02d:%02d] Waiting for all active workers to finish.\n"
