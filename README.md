@@ -1,4 +1,4 @@
-# FileSync System (FSS)
+# Local FileSync System
 
 
 ## Overview
@@ -87,11 +87,19 @@ The bash script provides reporting and cleanup in four commands:
 #### Execution
 
 1. Run the manager:
-```./fss_manager -l manager.log -c config.txt [-n worker_limit]``` (The worker programs are executed internally by the manager)
+```bash
+./fss_manager -l manager.log -c data/config.txt [-n worker_limit]
+```
+(The worker programs are executed internally by the manager)
+
 2. Run the console:
-```./fss_console -l console.log```
+```bash
+./fss_console -l console.log
+```
 3. Run the script:
-```./fss_script.sh -p path -c command```
+```bash
+./fss_script.sh -p path -c command
+```
 
 ### Implementation Notes
 

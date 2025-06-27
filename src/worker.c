@@ -10,17 +10,15 @@
 #include <sys/stat.h>
 #include <time.h>
 
-// Function to print the report with the worker tag in the stdout
-// (which will be redirected to the worker pipe in the manager)
+// Function to print the report with the worker tag
 void print_report(const char *status, const char *details, const char *errors,
-    const char *source, const char *target, const char *operation){
+    const char *source, const char *target, const char *operation) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     char timestamp[20];
-	// Format timestamp as "YYYY-MM-DD HH:MM:SS"
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
     
-    printf("[%s] [WORKER_REPORT] [%s] [%s] [%d] [%s] [%s] [%s]\n",timestamp, source, target,
+    printf("[%s] [WORKER_REPORT] [%s] [%s] [%d] [%s] [%s] [%s]\n", timestamp, source, target,
         getpid(), operation,status, strcmp(status, "ERROR") ? details : errors);
     
     fflush(stdout);
@@ -30,13 +28,10 @@ void print_report(const char *status, const char *details, const char *errors,
 int sync_file(const char *src, const char *dest) {
 	struct stat src_stat = {0}, dest_stat = {0};
 
-	// Get source file stats
 	if (stat(src, &src_stat)) {
         return -1;
     }
-
-	// Check if destination file exists and compare stats
-    if (!stat(dest, &dest_stat)) {
+	else {
         // If src and dest files have same size and modification time, they are identical
         if (src_stat.st_size == dest_stat.st_size && 
             src_stat.st_mtime <= dest_stat.st_mtime) {
@@ -46,7 +41,7 @@ int sync_file(const char *src, const char *dest) {
 
     char path[50];
     snprintf(path, sizeof(path), "%s", dest);
-    char *slash = strrchr(path,'/');
+    char *slash = strrchr(path, '/');
     if (slash) {
 		// If needed we create a parent directory for destination
         *slash ='\0';
@@ -119,7 +114,9 @@ int main(int argc, char *argv[]) {
             } else if (result == 1) {
 				// File skipped
                 skip_count++;
-            } else {
+            }
+			else {
+				// Error
                 error_count++;
                 char error_msg[300];
                 snprintf(error_msg, sizeof(error_msg), "File %s: %s", entry->d_name, strerror(errno));
@@ -147,7 +144,7 @@ int main(int argc, char *argv[]) {
         snprintf(src_path, sizeof(src_path), "%s/%s", source, filename);
         snprintf(dest_path, sizeof(dest_path), "%s/%s", target, filename);
 
-        if (!strcmp(operation, "ADDED") || !strcmp(operation, "MODIFIED")){
+        if (!strcmp(operation, "ADDED") || !strcmp(operation, "MODIFIED")) {
             if (sync_file(src_path, dest_path) != -1) {
                 snprintf(details, sizeof(details), "File: %s", filename);
                 print_report("SUCCESS", details, NULL, source, target, operation);
@@ -157,7 +154,7 @@ int main(int argc, char *argv[]) {
                 print_report("ERROR", NULL, error_msg, source, target, operation);
             }
         } 
-        else if (strcmp(operation, "DELETED") != -1){
+        else if (strcmp(operation, "DELETED") != -1) {
 			// Try to delete the destination file
             if (unlink(dest_path) == 0) {
                 snprintf(details, sizeof(details), "File: %s", filename);
@@ -169,8 +166,7 @@ int main(int argc, char *argv[]) {
                 print_report("ERROR", NULL, error_msg, source, target, operation);
             }
         }
-		else 
-		{
+		else {
 			return -1;
 		}
     }

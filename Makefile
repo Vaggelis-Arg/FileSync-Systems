@@ -19,7 +19,6 @@ BINARIES = fss_console fss_manager worker
 
 all: $(BINARIES)
 
-# Create build directory if it doesn't exist
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
