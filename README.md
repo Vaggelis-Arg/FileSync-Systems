@@ -1,13 +1,15 @@
-# Network-File-System
+# Network FileSync System
 
 
 ## Overview
 
-Network File Sync (NFS) is a distributed file synchronization system that synchronizes directories using TCP sockets, worker threads and condition variables. The system consists of three components:
+Network FileSync System (NFS) is a distributed file synchronization system that synchronizes directories using TCP sockets, worker threads and condition variables. The system consists of three components:
 
 - nfs_manager: Coordinates synchronization tasks and manages worker threads.
 - nfs_client: Server that provides file listing, pulling, and pushing services.
 - nfs_console: User interface that sends commands to the manager over a TCP connection.
+
+**Note**: This system is designed to work across different machines with different IP addresses, as long as they can reach each other over the network. The manager, clients, and console communicate entirely over TCP sockets, so you can run each component on separate computers—even in different subnets—by specifying the correct hostnames or IPs.
 
 <div align="center"> <img src="assets/nfs-image.png" alt="NFS-System" width="500"> </div>
 

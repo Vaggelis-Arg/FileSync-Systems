@@ -20,23 +20,22 @@ static void handle_list(int connfd, char *dir) {
 	if(dirptr == NULL) {
 		if (write(connfd, ".\n", 2) < 0)
 			// There is nothing to send to the socket
-			fprintf(stderr, "Could not write in the connection socket: %s", strerror(errno));
+			fprintf(stderr, "Could not write in the connection socket\n");
 		return;
 	}
 
 	struct dirent *file;
 	while((file = readdir(dirptr)) != NULL) {
 		if (strcmp(file->d_name, ".") && strcmp(file->d_name, "..")) {
-			// write to the connection socket all the entries of the directory instead of the current and previous folders 
 			char buffer[300];
 			snprintf(buffer, sizeof(buffer), "%s\n", file->d_name);
 			if (write(connfd, buffer, strlen(buffer)) < 0)
-				fprintf(stderr, "Could not write in the connection socket: %s", strerror(errno));
+				fprintf(stderr, "Could not write in the connection socket\n");
 		}
 	}
 	if(write(connfd, ".\n", 2) < 0) {
-		// End with ".""
-		fprintf(stderr, "Could not write in the connection socket: %s", strerror(errno));
+		// End with "."
+		fprintf(stderr, "Could not write in the connection socket\n");
 	}
 	closedir(dirptr);
 }
@@ -45,7 +44,7 @@ static void handle_list(int connfd, char *dir) {
 static void handle_pull(int connfd, char *filepath) {
 	int fd = open(filepath, O_RDONLY);
 	if(fd < 0) {
-		dprintf(connfd, "Could not open the filepath: %s\n", strerror(errno));
+		dprintf(connfd, "Could not open the filepath\n");
 		return;
 	}
 
@@ -57,12 +56,11 @@ static void handle_pull(int connfd, char *filepath) {
 	char buffer[100];
 	int len = snprintf(buffer, sizeof(buffer), "%ld ", filesize);
 	if(write(connfd, buffer, len) < 0)
-		fprintf(stderr, "Could not write in the connection socket: %s", strerror(errno));
+		fprintf(stderr, "Could not write in the connection socket\n");
 	char read_buffer[1024];
 	ssize_t bytes_read;
 
 	while((bytes_read = read(fd, read_buffer, sizeof(read_buffer))) > 0) {
-		// Read the bytes from the file and send them to the worker through the socket
 		send(connfd, read_buffer, bytes_read, 0);
 	}
 	close(fd);
@@ -95,7 +93,7 @@ static void handle_push(int connfd, char *line, FILE **out_fp) {
         return;
     }
 
-    // Find where the actual binary data starts in `line` (after third space)
+    // Find where the actual binary data starts (after third space)
 	// Format: PUSH<space>filepath<space>chunk_size<space>data
     char *start_data = line;
     int space_count = 0;
@@ -110,7 +108,6 @@ static void handle_push(int connfd, char *line, FILE **out_fp) {
         return;
     }
 
-	// Find how many bytes we have read and how many there are left to read
     int header_len = start_data - line;
     int remaining = chunk_size;
 
@@ -152,9 +149,9 @@ static inline ssize_t read_line_from_socket(int sockfd, char *buf, size_t max_le
     return total_read;
 }
 
-static void *handle_connection(void *arg) { // pthread required "void *function(void *arg)" function type
+static void *handle_connection(void *arg) {
 	int connfd = *(int *)arg;
-	free(arg);  // Free the dynamically allocated memory in heap
+	free(arg);
 
 	char line[200];
 
@@ -196,7 +193,7 @@ int main(int argc, char *argv[]) {
 	struct sockaddr_in servaddr, cliaddr;
 	socklen_t len;
 
-	listenfd = socket(AF_INET, SOCK_STREAM, 0); // listen socket
+	listenfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (listenfd < 0) {
         perror("socket");
         exit(EXIT_FAILURE);
@@ -210,21 +207,19 @@ int main(int argc, char *argv[]) {
     servaddr.sin_addr.s_addr = INADDR_ANY;
     servaddr.sin_port = htons(port);
 
-	// bind socket to the server
     if (bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
 
-	// listen for connections (limit 5 simultaneously)
     listen(listenfd, 5);
 
     while (1) {
         len = sizeof(cliaddr);
-        int *connfd_ptr = malloc(sizeof(int)); // allocate socket descriptor for the thread to handle it
+        int *connfd_ptr = malloc(sizeof(int));
 		*connfd_ptr = accept(listenfd, (struct sockaddr *)&cliaddr, &len);
 		if (*connfd_ptr < 0) {
-			fprintf(stderr, "Error in connection acceptance: %s\n", strerror(errno));
+			fprintf(stderr, "Error in connection acceptance\n");
 			free(connfd_ptr);
 			continue;
 		}
@@ -232,12 +227,11 @@ int main(int argc, char *argv[]) {
 		pthread_t thread_id;
 		// Connections are handled in parallel (having threads to handle each connection)
 		if (pthread_create(&thread_id, NULL, handle_connection, connfd_ptr) != 0) {
-			fprintf(stderr, "Error in creating thread to handle the connection: %s\n", strerror(errno));
+			fprintf(stderr, "Error in creating thread to handle the connection\n");
 			close(*connfd_ptr);
 			free(connfd_ptr);
 		} else {
-			pthread_detach(thread_id); // detach the thread
-			// Threads are exiting after they finish (we don't have to wait them to join the main thread)
+			pthread_detach(thread_id);
 		}
     }
 

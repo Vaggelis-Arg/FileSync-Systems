@@ -1,3 +1,4 @@
+/* File: nfs_console.c */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,7 +98,6 @@ int main(int argc, char *argv[]) {
 
 		char found_end = 0;
 		while (!found_end) {
-			// read the response of the console until you find "END" and then print it and ask the user for next command
 			ssize_t bytes_received = recv(sockfd, response, sizeof(response) - 1, 0);
 			if (bytes_received <= 0) {
 				perror("recv");

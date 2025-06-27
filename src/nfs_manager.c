@@ -25,14 +25,12 @@ struct sync_info {
     int target_port;
 	int source_port;
     int active;
-	int error_count;
-    time_t last_sync;
     SyncInfo *next;
 };
 
-// Circular queue to add the tasks (specific files to get copied from the src dir to the target dir) 
+// Circular queue to add the tasks
 struct sync_queue_task {
-    char filename[50];
+    char filename[80];
     char source_dir[100];
 	char target_dir[100];
 	char source_host[50];
@@ -49,9 +47,9 @@ static int buffer_head = 0;
 static int buffer_tail = 0;
 static int buffer_count = 0;
 
-static pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex to protect buffer/queue operations
-static pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER;  // cond variable to wait until queue is not empty
-static pthread_cond_t not_full = PTHREAD_COND_INITIALIZER; // cond variable to wait until queue is not full
+static pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t not_empty = PTHREAD_COND_INITIALIZER; 
+static pthread_cond_t not_full = PTHREAD_COND_INITIALIZER;
 
 static char manager_logfile[60];
 static int worker_limit = 5;
@@ -60,8 +58,8 @@ static int buffer_size = 0;
 
 static int total_tasks = 0;
 static int completed_tasks = 0;
-static pthread_mutex_t task_done_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex to protect the total_tasks and completed_tasks variables
-static pthread_cond_t all_tasks_done = PTHREAD_COND_INITIALIZER; // cond variable to wait until all tasks are done
+static pthread_mutex_t task_done_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t all_tasks_done = PTHREAD_COND_INITIALIZER;
 
 static int shutting_down = 0;
 
@@ -79,47 +77,48 @@ static void log_sync_result(SyncTask task, const char *operation, const char *re
 
 // Function to clean manager log file from previous execution
 static void clean_logfile(const char *logfile) {
-	FILE *fp = fopen(logfile, "w"); // Open existing file with "write" command so that it will get empty
+	FILE *fp = fopen(logfile, "w");
 	if (!fp) {
-		fprintf(stderr, "Failed to open logfile %s: %s", logfile, strerror(errno));
+		fprintf(stderr, "Failed to open logfile %s\n", logfile);
 		return;
 	}
-	fclose(fp); // close the file
+	fclose(fp);
 }
 
 
 // Producer
 void enqueue_task(SyncTask task) {
-	pthread_mutex_lock(&buffer_mutex); // lock the buffer mutex (no other thread can operate in buffer until current thread finishes)
+	pthread_mutex_lock(&buffer_mutex);
 	while(buffer_count >= buffer_size) { // if queue is full
-		pthread_cond_wait(&not_full, &buffer_mutex); // Wait until space is available in buffer
+		pthread_cond_wait(&not_full, &buffer_mutex);
 	}
 	task_buffer[buffer_tail] = task;
 	buffer_tail = (buffer_tail + 1) % buffer_size; // move tail of the queue in a circular way
 	buffer_count++;
-	pthread_mutex_lock(&task_done_mutex); // lock mutex for task counts
+	pthread_mutex_lock(&task_done_mutex);
 	total_tasks++;
-	pthread_mutex_unlock(&task_done_mutex); // unlock the mutex for the task counts
-	pthread_cond_signal(&not_empty); // We added the task, so queue is not empty (signal for any thread which tries to dequeue a task)
-	pthread_mutex_unlock(&buffer_mutex); // I finished, next thread can now operate in the task queue
+	pthread_mutex_unlock(&task_done_mutex);
+	pthread_cond_signal(&not_empty);
+	pthread_mutex_unlock(&buffer_mutex);
 }
 
 // Consumer
 SyncTask dequeue_task() {
-	pthread_mutex_lock(&buffer_mutex); // lock buffer for exclusive access
+	pthread_mutex_lock(&buffer_mutex);
 	while(buffer_count <= 0) { // if queue is empty
-		if (shutting_down) { // if there is a signal from the manager to shut down
+		if (shutting_down) {
+			// signal from the manager to shut down
 			pthread_mutex_unlock(&buffer_mutex);
-			pthread_exit(NULL);  // exit the thread if we're shutting down
+			pthread_exit(NULL);
 		}
-		pthread_cond_wait(&not_empty, &buffer_mutex); // wait until buffer is not empty
+		pthread_cond_wait(&not_empty, &buffer_mutex);
 	}
 	SyncTask task = task_buffer[buffer_head];
 	buffer_head = (buffer_head + 1) % buffer_size; // move the head of the queue in a circular way
 	buffer_count--;
 
-	pthread_cond_signal(&not_full); // I just removed a task from the queue so it is definitely not full. Signal the producer thread that there is space now
-	pthread_mutex_unlock(&buffer_mutex); // unlock buffer
+	pthread_cond_signal(&not_full);
+	pthread_mutex_unlock(&buffer_mutex);
 	return task;
 }
 
@@ -127,20 +126,25 @@ SyncTask dequeue_task() {
 static void parse_config_file(char *config) {
 	FILE *fp = fopen(config, "r");
     if (!fp) {
-		fprintf(stderr, "Error opening config file %s: %s\n", config, strerror(errno));
+		fprintf(stderr, "Error opening config file %s\n", config);
         exit(EXIT_FAILURE);
     }
 
 	char line[200];
 	while (fgets(line, sizeof(line), fp)) {
+
+		if (line[0] == '\n' || strspn(line, " \t\r\n") == strlen(line)) {
+			continue;
+		}
+
 		char src[100], target[100];
 
 		if (sscanf(line, "%s %s", src, target) != 2) {
-            fprintf(stderr, "Incorect config file: %s\n", strerror(errno));
+            fprintf(stderr, "Incorect config file\n");
             exit(EXIT_FAILURE);
         }
 
-		char src_path[50], src_host[50], target_path[50], target_host[50];
+		char src_path[100], src_host[50], target_path[100], target_host[50];
         int src_port, target_port;
 
 		// parse source directory, host and port
@@ -151,7 +155,7 @@ static void parse_config_file(char *config) {
 			exit(EXIT_FAILURE);
 		}
 		*src_path_end = '\0';
-		strncpy(src_path, src, 50);
+		strncpy(src_path, src, 100);
 
 		char *src_host_end = strchr(src_path_end + 1, ':');
 		if (!src_host_end) {
@@ -171,7 +175,7 @@ static void parse_config_file(char *config) {
 			exit(EXIT_FAILURE);
 		}
 		*target_path_end = '\0';
-		strncpy(target_path, target, 50);
+		strncpy(target_path, target, 100);
 
 		char *target_host_end = strchr(target_path_end + 1, ':');
 		if (!target_host_end) {
@@ -183,12 +187,11 @@ static void parse_config_file(char *config) {
 
 		target_port = atoi(target_host_end + 1);
 
-
 		// Create new node in sync_info_mem_store to store the current sync configuration
 
 		SyncInfo *node = malloc(sizeof(*node));
         if (node == NULL) {
-            fprintf(stderr, "Error in memory allocation: %s\n", strerror(errno));
+            fprintf(stderr, "Error in memory allocation\n");
             exit(EXIT_FAILURE);
         }
 
@@ -197,9 +200,9 @@ static void parse_config_file(char *config) {
         node->source_port = src_port;
         strncpy(node->target_dir, target_path, sizeof(node->target_dir));
 		struct stat st = {0};
-		if (stat(node->target_dir, &st) == -1) { // if target dir does not exist -> create it
+		if (stat(node->target_dir, &st) == -1) { // create target dir if not exist
 			if (mkdir(node->target_dir, 0755) < 0) {
-				fprintf(stderr, "Error in creating directory: %s\n", strerror(errno));
+				fprintf(stderr, "Error in creating directory\n");
 				return;
 			}
 		}
@@ -208,8 +211,6 @@ static void parse_config_file(char *config) {
         node->target_port = target_port;
 
         node->active = 1;
-        node->last_sync = 0;
-        node->error_count = 0;
         node->next = sync_info_mem_store;
         sync_info_mem_store = node;
 	}
@@ -241,22 +242,22 @@ void *worker_thread(void *arg) {
                 pthread_cond_signal(&all_tasks_done);
             }
             pthread_mutex_unlock(&task_done_mutex);
-            continue; // source dir has been cancelled. Do not continue with the sync
+            continue; // source dir has been cancelled. Do not continue with the sync.
         }
 
 		struct sockaddr_in addr;
 		int src_socket, target_socket;
 
 		// source socket
-		if((src_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
-			fprintf(stderr, "Failed to create socket to listen for source dir: %s\n", strerror(errno));
+		if((src_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+			fprintf(stderr, "Failed to create socket to listen for source dir\n");
 			continue;
 		}
 
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(curr_task.source_port);
 
-		inet_pton(AF_INET, curr_task.source_host, &addr.sin_addr); //Convert presentation format address to network format
+		inet_pton(AF_INET, curr_task.source_host, &addr.sin_addr); // Convert presentation format address to network format
 
 		if(connect(src_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 			fprintf(stderr, "Failed to connect to source socket\n");
@@ -265,14 +266,14 @@ void *worker_thread(void *arg) {
 		}
 
 		// target socket
-		if((target_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) { // We use TCP protocol which is safer than UDP
+		if((target_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 			continue;
 		}
 
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(curr_task.target_port);
 
-		inet_pton(AF_INET, curr_task.target_host, &addr.sin_addr); //Convert presentation format address to network format
+		inet_pton(AF_INET, curr_task.target_host, &addr.sin_addr);
 
 		if(connect(target_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 			fprintf(stderr, "Failed to connect to target socket\n");
@@ -284,7 +285,7 @@ void *worker_thread(void *arg) {
 
 		char pull_src[200];
 		snprintf(pull_src, sizeof(pull_src), "PULL %s/%s\n", curr_task.source_dir, curr_task.filename);
-		send(src_socket, pull_src, strlen(pull_src), 0); // send pull command to client
+		send(src_socket, pull_src, strlen(pull_src), 0);
 
 		// nfs client sends response <filesize><space><data…>
 
@@ -292,7 +293,6 @@ void *worker_thread(void *arg) {
 		char file_size_buf[100];
 		long unsigned int i = 0;
 		char ch;
-		// I read character by character the socket response from PULL command until I find space and then I convert the given string to an integer which is the filesize
 		while (i < sizeof(file_size_buf) - 1) {
 			int r = recv(src_socket, &ch, 1, 0); // read from the socket one byte at a time
 			if (r <= 0) {
@@ -325,8 +325,8 @@ void *worker_thread(void *arg) {
 		// Now we read the actual data
 		long parsed_data = 0;
 		while(parsed_data < filesize) {
-			// The data are sent in chunks so we cannot just receive them and push them to the detsination file
-			int new_data = recv(src_socket, file_data + parsed_data, filesize - parsed_data, 0); // write new data in the file_data starting from the "parsed_data" position
+			// The data are sent in chunks
+			int new_data = recv(src_socket, file_data + parsed_data, filesize - parsed_data, 0);
 			if(new_data <= 0)
 				break;
 			parsed_data += new_data;
@@ -343,15 +343,15 @@ void *worker_thread(void *arg) {
 		snprintf(truncate_to_push, sizeof(truncate_to_push), "PUSH %s/%s -1\n", curr_task.target_dir, curr_task.filename);
 		send(target_socket, truncate_to_push, strlen(truncate_to_push), 0);
 
-		//send data of source dir to target dir in chucks
+		// send data of source dir to target dir in chucks
 		long long data_sent = 0;
 		while(data_sent < filesize) {
 			unsigned int chunk_size = (filesize - data_sent < 1024) ? filesize - data_sent : 1024; // we use 1 KB as the default chuck size to load
 			char push_command[2000];
 			snprintf(push_command, sizeof(push_command), "PUSH %s/%s %d ", curr_task.target_dir, curr_task.filename, chunk_size);
-			char *full_message = malloc(strlen(push_command) + chunk_size); // full message contains the PUSH command and the data of the current chunk
-			memcpy(full_message, push_command, strlen(push_command)); // write push message
-			memcpy(full_message + strlen(push_command), file_data + data_sent, chunk_size); // write the data of the current chunk
+			char *full_message = malloc(strlen(push_command) + chunk_size);
+			memcpy(full_message, push_command, strlen(push_command));
+			memcpy(full_message + strlen(push_command), file_data + data_sent, chunk_size);
 			send(target_socket, full_message, strlen(push_command) + chunk_size, 0);
 			free(full_message);
 			data_sent += chunk_size;
@@ -368,18 +368,18 @@ void *worker_thread(void *arg) {
 		close(src_socket);
 		close(target_socket);
 
-		pthread_mutex_lock(&task_done_mutex); // lock the mutex for the operations in tasks counters
+		pthread_mutex_lock(&task_done_mutex);
 		completed_tasks++;
 		if (completed_tasks == total_tasks) {
 			pthread_cond_signal(&all_tasks_done);  // Notify main thread that all tasks in the queue are done
 		}
-		pthread_mutex_unlock(&task_done_mutex); // unlock the mutex of task operations
+		pthread_mutex_unlock(&task_done_mutex);
 	}
 	return NULL;
 }
 
-void sync_pair_files(SyncInfo *curr, int connection_fd) { // I pass not only the sync info node but also the socket descriptor for communication with console
-	if (!curr->active) // sync is inactive (pair has been canceled)
+void sync_pair_files(SyncInfo *curr, int connection_fd) { // the socket descriptor is for communication with console
+	if (!curr->active)
 		return;
 	
 	char list_of_files[100][100]; // maximum 100 files per dir
@@ -387,25 +387,25 @@ void sync_pair_files(SyncInfo *curr, int connection_fd) { // I pass not only the
 	struct sockaddr_in addr;
 	int socket_ = socket(AF_INET, SOCK_STREAM, 0); // create a socket to connect with the corresponding client of the source dir
 	if(socket_ < 0) {
-		fprintf(stderr, "Failed to create to socket with TCP protocol: %s\n", strerror(errno));
+		fprintf(stderr, "Failed to create to socket with TCP protocol\n");
 		return;
 	}
 
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(curr->source_port);
 	if(inet_pton(AF_INET, curr->source_host, &addr.sin_addr) <= 0) {
-		fprintf(stderr, "Failed to convert presentation format address to network format: %s\n", strerror(errno));
+		fprintf(stderr, "Failed to convert presentation format address to network format\n");
 		close(socket_);
 		return;
 	}
 
 	if(connect(socket_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-		fprintf(stderr, "Failed to connect to source socket: %s\n", strerror(errno));
+		fprintf(stderr, "Failed to connect to source socket\n");
 		close(socket_);
 		return;
 	}
 
-	// Ask client (through the socket) to send all the files of the source dir (command LIST)
+	// Ask client to send all the files of the source dir
 	char list_command[150];
 	snprintf(list_command, sizeof(list_command), "LIST %s\n", curr->source_dir);
 	send(socket_, list_command, strlen(list_command), 0);
@@ -418,7 +418,7 @@ void sync_pair_files(SyncInfo *curr, int connection_fd) { // I pass not only the
 		return;
 	}
 
-	// Save all the files (that the client sent) to a list_of_files array
+	// Save all the files to a list_of_files array
 	char temp_line[100];
 	while(fgets(temp_line, sizeof(temp_line), fp)) {
 		if (strcmp(temp_line, ".\n") == 0 || strcmp(temp_line, ".\r\n") == 0) {
@@ -458,12 +458,12 @@ void sync_pair_files(SyncInfo *curr, int connection_fd) { // I pass not only the
 
 		FILE *fp = fopen(manager_logfile, "a");
 		if(fp == NULL) {
-			fprintf(stderr, "Failed to open manager logfile with \'a\': %s", strerror(errno));
+			fprintf(stderr, "Failed to open manager logfile with \'a\'\n");
 			break;
 		}
 		time_t now = time(NULL);
 		struct tm *t = localtime(&now);
-		char response[500];
+		char response[600];
 		sprintf(response, "[%04d-%02d-%02d %02d:%02d:%02d] Added file: %s/%s@%s:%d -> %s/%s@%s:%d\n",
 				t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
 				t->tm_hour, t->tm_min, t->tm_sec,
@@ -473,7 +473,7 @@ void sync_pair_files(SyncInfo *curr, int connection_fd) { // I pass not only the
 		fprintf(fp, "%s", response);
 		
 		fclose(fp);
-		if(connection_fd != -1) // if current sync has been requested by the console, send response!
+		if(connection_fd != -1) // if current sync has been requested by the console, send response
 			send(connection_fd, response, strlen(response), 0);
 	}
 }
@@ -495,7 +495,7 @@ int main(int argc, char *argv[]) {
 		else if (!strcmp(argv[i], "-c") && i + 1 < argc) {
 			char config_file[40];
             strncpy(config_file, argv[i + 1], sizeof(config_file));
-			parse_config_file(config_file); // parse the config file once we get it
+			parse_config_file(config_file);
         }
 		else if (!strcmp(argv[i], "-n") && i + 1 < argc) {
             worker_limit = atoi(argv[i + 1]);
@@ -553,6 +553,7 @@ int main(int argc, char *argv[]) {
 		curr = curr->next;
 	}
 
+	// socket to communicate with console
 	int server_fd, connection_fd;
 	struct sockaddr_in server_addr, client_addr;
 	socklen_t client_len = sizeof(client_addr);
@@ -563,12 +564,12 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	int optval = 1; // flag to activate reuse option for tthe manager's socket
-	setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)); // reuse server socket address (server_fd) no matter if it is occupied (avoid TIME_WAIT)
+	int optval = 1;
+	setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)); // reuse socket address no matter if it is occupied
 
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET; // adress in IPv4
-	server_addr.sin_addr.s_addr = INADDR_ANY; // listen to all ports
+	server_addr.sin_addr.s_addr = INADDR_ANY;
 	server_addr.sin_port = htons(port_number);
 
 	// bind manager socket with the local adress
@@ -577,7 +578,6 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	// listen for maximum "worker_limit" connections at the same time
 	listen(server_fd, worker_limit);
 
 	connection_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
@@ -592,8 +592,7 @@ int main(int argc, char *argv[]) {
 		if ((bytes_read = read(connection_fd, command_read, sizeof(command_read) - 1)) > 0) {
 			command_read[bytes_read] = '\0';
 
-			// Remove trailing newline
-			command_read[strcspn(command_read, "\r\n")] = '\0'; // remove \r and \n
+			command_read[strcspn(command_read, "\r\n")] = '\0';
 
 			if (strncmp(command_read, "add ", 4) == 0) {
 				char src[100], target[100];
@@ -697,8 +696,6 @@ int main(int argc, char *argv[]) {
 				node->target_port = atoi(target_host_end + 1);
 
 				node->active = 1;
-				node->last_sync = 0;
-				node->error_count = 0;
 
 				// Add to front of sync_info_mem_store list
 				node->next = sync_info_mem_store;
@@ -732,7 +729,6 @@ int main(int argc, char *argv[]) {
 					curr = curr->next;
 				}
 
-				// Print corresponding message depending whether we found the dir or not in the sync_info_mem_store
 				char response[400];
 				if (cancelled) {
 					time_t now = time(NULL);
@@ -776,18 +772,17 @@ int main(int argc, char *argv[]) {
 				send(connection_fd, response, strlen(response), 0);
 
 				pthread_mutex_lock(&task_done_mutex);
-				while (completed_tasks < total_tasks) { // wait for all the tasks to finish
+				while (completed_tasks < total_tasks) {
 					pthread_cond_wait(&all_tasks_done, &task_done_mutex);
 				}
 				pthread_mutex_unlock(&task_done_mutex);
 
 				shutting_down = 1;
 
-				// Wake all waiting worker threads
 				pthread_cond_broadcast(&not_empty);
 
 				for (int i = 0; i < worker_limit; i++) {
-					pthread_cancel(worker_threads[i]); // terminates infinite-loop threads
+					pthread_cancel(worker_threads[i]);
 					pthread_join(worker_threads[i], NULL);
 				}
 
@@ -800,7 +795,6 @@ int main(int argc, char *argv[]) {
 				
 				send(connection_fd, "END\n", 4, 0);
 
-				// Free sync info nodes
 				SyncInfo *curr = sync_info_mem_store;
 				while (curr != NULL) {
 					SyncInfo *next = curr->next;
